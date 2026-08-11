@@ -12,16 +12,9 @@ import { getQuestions, submitAnswer, getFeedback } from '@/utils/api';
 export default function InterviewSessionPage() {
   return (
     <Suspense fallback={<SessionLoading />}>
-      <InterviewSessionContentWrapper />
+      <InterviewSessionContent />
     </Suspense>
   );
-}
-
-function InterviewSessionContentWrapper() {
-  const router = useRouter();
-  const params = useSearchParams();
-  
-  return <InterviewSessionContent router={router} params={params} />;
 }
 
 function SessionLoading() {
@@ -38,7 +31,9 @@ function SessionLoading() {
   );
 }
 
-function InterviewSessionContent({ router, params }) {
+function InterviewSessionContent() {
+  const router = useRouter();
+  const params = useSearchParams();
   const [questions, setQuestions] = useState([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isProcessing, setIsProcessing] = useState(false);

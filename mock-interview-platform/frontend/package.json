@@ -9,12 +9,11 @@
     "lint": "eslint src"
   },
   "dependencies": {
-    "@headlessui/react": "^1.7.17",
     "@heroicons/react": "^2.0.18",
     "axios": "^1.7.9",
     "next": "^16.3.0",
-    "react": "^18.3.1",
-    "react-dom": "^18.3.1",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
     "react-hot-toast": "^2.4.1",
     "react-webcam": "^7.1.1",
     "socket.io-client": "^4.8.1",
@@ -22,8 +21,9 @@
   },
   "devDependencies": {
     "autoprefixer": "^10.4.20",
-    "eslint": "^8.57.0",
+    "eslint": "^9.39.5",
     "eslint-config-next": "^16.3.0",
-    "postcss": "^8.4.49"
+    "postcss": "^8.4.49",
+    "typescript": "^6.0.3"
   }
 }

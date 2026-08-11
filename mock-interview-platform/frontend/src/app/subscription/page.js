@@ -2,7 +2,13 @@
 
 import { useState, useEffect } from 'react';
 import Navigation from '@/components/Navigation';
-import { getSubscriptionStatus, createCheckoutSession, getUpiInfo, createUpiPayment } from '@/utils/api';
+import {
+  createRazorpayOrder,
+  createUpiPayment,
+  getSubscriptionStatus,
+  getUpiInfo,
+  verifyRazorpayPayment,
+} from '@/utils/api';
 
 const fetchSubscriptionStatus = async (setSubscription, setLoading, setError) => {
   try {
@@ -35,22 +41,6 @@ export default function SubscriptionPage() {
     fetchSubscriptionStatus(setSubscription, setLoading, setError);
   }, [setSubscription, setLoading, setError]);
 
-  const handleSubscribe = async (tier) => {
-    try {
-      setProcessing(true);
-      const data = await createCheckoutSession({ tier });
-      if (data.url) {
-        window.location.assign(data.url);
-      } else {
-        setError('Failed to create checkout session');
-      }
-    } catch (err) {
-      setError('Failed to initiate subscription');
-    } finally {
-      setProcessing(false);
-    }
-  };
-
   const handleUpiPayment = async (tier) => {
     setSelectedTier(tier);
     setShowUpiModal(true);
@@ -59,7 +49,8 @@ export default function SubscriptionPage() {
       const data = await getUpiInfo();
       setUpiInfo(data);
     } catch (err) {
-      setError('Failed to load UPI information');
+      console.error('UPI info error:', err);
+      setError(err.response?.data?.error || err.message || 'Failed to load UPI information');
     }
   };
 
@@ -89,11 +80,74 @@ export default function SubscriptionPage() {
     }
   };
 
+  const handleRazorpayCheckout = async (tier) => {
+    if (!window.Razorpay) {
+      setError('Razorpay checkout is still loading. Please try again in a moment.');
+      return;
+    }
+
+    try {
+      setProcessing(true);
+      setError(null);
+      const data = await createRazorpayOrder({ tier });
+      const key = process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID || data.key_id;
+
+      if (!data.order_id || !key) {
+        throw new Error(data.error || 'Unable to initialize Razorpay checkout');
+      }
+
+      const razorpay = new window.Razorpay({
+          key,
+          order_id: data.order_id,
+          currency: data.currency || 'INR',
+          amount: data.amount,
+          name: 'MockInterview AI',
+          description: `${tier === 'basic' ? 'Basic' : 'Pro'} plan subscription`,
+          handler: async (response) => {
+            try {
+              const result = await verifyRazorpayPayment({
+                razorpay_order_id: response.razorpay_order_id,
+                razorpay_payment_id: response.razorpay_payment_id,
+                razorpay_signature: response.razorpay_signature,
+              });
+              if (result.status !== 'success') {
+                throw new Error(result.error || 'Payment verification failed');
+              }
+              await fetchSubscriptionStatus(setSubscription, setLoading, setError);
+              alert('Payment verified successfully! Your subscription is now active.');
+            } catch (err) {
+              setError(err.response?.data?.error || err.message || 'Payment verification failed');
+            } finally {
+              setProcessing(false);
+            }
+          },
+          modal: {
+            ondismiss: () => {
+              setProcessing(false);
+              setError('Payment was cancelled.');
+            },
+          },
+          theme: {
+            color: '#2563eb',
+          },
+        });
+      razorpay.on('payment.failed', (response) => {
+        setProcessing(false);
+        setError(response.error?.description || 'Payment failed. Please try again.');
+      });
+      razorpay.open();
+    } catch (err) {
+      setProcessing(false);
+      setError(err.response?.data?.error || err.message || 'Failed to initiate Razorpay payment');
+    }
+  };
+
   const plans = [
     {
       id: 'free',
       name: 'Free',
       price: 0,
+      priceInr: '₹0',
       interval: 'forever',
       interviews: 3,
       features: [
@@ -103,12 +157,13 @@ export default function SubscriptionPage() {
         '7-day feedback history',
       ],
       cta: subscription?.tier === 'free' ? 'Current Plan' : 'Downgrade',
-      disabled: subscription?.tier === 'free',
+      disabled: true,
     },
     {
       id: 'basic',
       name: 'Basic',
-      price: 9,
+      price: 5,
+      priceInr: '₹375',
       interval: 'month',
       interviews: 15,
       features: [
@@ -126,7 +181,8 @@ export default function SubscriptionPage() {
     {
       id: 'pro',
       name: 'Pro',
-      price: 19,
+      price: 10,
+      priceInr: '₹750',
       interval: 'month',
       interviews: 'Unlimited',
       features: [
@@ -141,6 +197,23 @@ export default function SubscriptionPage() {
       disabled: subscription?.tier === 'pro',
     },
   ];
+
+  // Initialize Razorpay script
+  useEffect(() => {
+    if (window.Razorpay) {
+      return undefined;
+    }
+
+    const script = document.createElement('script');
+    script.src = 'https://checkout.razorpay.com/v1/checkout.js';
+    script.onerror = () => {
+      setError('Unable to load Razorpay checkout. Please refresh and try again.');
+    };
+    document.body.appendChild(script);
+    return () => {
+      script.remove();
+    };
+  }, []);
 
   if (loading) {
     return (
@@ -220,10 +293,15 @@ export default function SubscriptionPage() {
 
               <div className="mb-6">
                 <h3 className="mb-2 text-2xl font-bold text-gray-900">{plan.name}</h3>
-                <div className="flex items-baseline">
-                  <span className="text-4xl font-bold text-gray-900">${plan.price}</span>
-                  <span className="ml-2 text-gray-600">/{plan.interval}</span>
+                <div className="flex items-baseline gap-2">
+                  <span className="text-4xl font-bold text-gray-900">$${plan.price}</span>
+                  <span className="text-lg text-gray-600">/ {plan.interval}</span>
                 </div>
+                {plan.price > 0 && (
+                  <p className="mt-1 text-sm font-medium text-gray-500">
+                    {plan.priceInr} INR
+                  </p>
+                )}
                 <p className="mt-2 text-sm text-gray-600">
                   {plan.interviews === 'Unlimited' 
                     ? 'Unlimited interviews' 
@@ -252,7 +330,7 @@ export default function SubscriptionPage() {
 
               <div className="space-y-2">
                 <button
-                  onClick={() => handleSubscribe(plan.id)}
+                  onClick={() => handleRazorpayCheckout(plan.id)}
                   disabled={plan.disabled || processing}
                   className={`w-full rounded-lg py-3 px-4 font-semibold transition-colors ${
                     plan.disabled
@@ -273,6 +351,7 @@ export default function SubscriptionPage() {
                     Pay with UPI
                   </button>
                 )}
+
               </div>
             </div>
           ))}
@@ -364,7 +443,7 @@ export default function SubscriptionPage() {
             <div>
               <h3 className="mb-2 font-semibold text-gray-900">Can I cancel anytime?</h3>
               <p className="text-gray-600">
-                Yes, you can cancel your subscription at any time. You'll continue to have access until the end of your billing period.
+                Yes, you can cancel your subscription at any time. You will continue to have access until the end of your billing period.
               </p>
             </div>
             <div>
@@ -381,7 +460,7 @@ export default function SubscriptionPage() {
             </div>
           </div>
         </div>
-      </main>
-    </div>
+        </main>
+      </div>
   );
 }

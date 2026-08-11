@@ -76,8 +76,13 @@ export const getSubscriptionStatus = async () => {
   return response.data;
 };
 
-export const createCheckoutSession = async (data) => {
-  const response = await api.post('/api/subscription/create-checkout-session', data);
+export const createRazorpayOrder = async (data) => {
+  const response = await api.post('/api/subscription/create-order', data);
+  return response.data;
+};
+
+export const verifyRazorpayPayment = async (data) => {
+  const response = await api.post('/api/subscription/verify-payment', data);
   return response.data;
 };
 

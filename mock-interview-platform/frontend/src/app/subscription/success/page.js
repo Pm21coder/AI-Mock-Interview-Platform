@@ -1,19 +1,15 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useSyncExternalStore } from 'react';
 import Navigation from '@/components/Navigation';
 import Link from 'next/link';
 
+const subscribeToLocation = () => () => {};
+const getSessionId = () => new URLSearchParams(window.location.search).get('session_id') || '';
+const getServerSessionId = () => '';
+
 export default function SubscriptionSuccessPage() {
-  const [sessionId, setSessionId] = useState('');
-  
-  if (typeof window !== 'undefined' && !sessionId) {
-    const urlParams = new URLSearchParams(window.location.search);
-    const session = urlParams.get('session_id');
-    if (session) {
-      setSessionId(session);
-    }
-  }
+  const sessionId = useSyncExternalStore(subscribeToLocation, getSessionId, getServerSessionId);
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -73,7 +69,7 @@ export default function SubscriptionSuccessPage() {
             </div>
 
             <div className="mt-8 rounded-lg bg-blue-50 p-6">
-              <h3 className="mb-2 font-semibold text-blue-900">What's Next?</h3>
+              <h3 className="mb-2 font-semibold text-blue-900">What&apos;s Next?</h3>
               <ul className="space-y-2 text-sm text-blue-800">
                 <li>✓ Your subscription is now active</li>
                 <li>✓ You can start using all premium features immediately</li>

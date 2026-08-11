@@ -1,4 +1,5 @@
 {
     "Codegeex.SidebarUI.LanguagePreference": "English",
-    "Codegeex.RepoIndex": true
+    "Codegeex.RepoIndex": true,
+    "python.defaultInterpreterPath": "${workspaceFolder}\\mock-interview-platform\\backend\\.venv\\Scripts\\python.exe"
 }
