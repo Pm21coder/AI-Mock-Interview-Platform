@@ -1,0 +1,83 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --foreground-rgb: 17, 24, 39;
+  --background-start-rgb: 249, 250, 251;
+  --background-end-rgb: 255, 255, 255;
+  --primary: 37, 99, 232;
+  --primary-hover: 29, 78, 216;
+  --accent: 139, 92, 246;
+  --success: 34, 197, 94;
+  --warning: 245, 158, 66;
+  --danger: 239, 68, 68;
+}
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+  }
+
+  body {
+    color: rgb(var(--foreground-rgb));
+    background: rgb(var(--background-end-rgb));
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+  }
+}
+
+@layer components {
+  .btn-primary {
+    @apply rounded-lg bg-blue-600 px-6 py-2.5 font-semibold text-white transition-all duration-200 hover:bg-blue-700 hover:shadow-lg;
+  }
+
+  .btn-secondary {
+    @apply rounded-lg border border-gray-300 px-6 py-2.5 font-semibold text-gray-700 transition-all duration-200 hover:bg-gray-50;
+  }
+
+  .card {
+    @apply rounded-xl bg-white p-6 shadow-lg;
+  }
+
+  .input-field {
+    @apply w-full rounded-lg border border-gray-300 px-4 py-2.5 text-gray-900 placeholder-gray-400 focus:border-transparent focus:ring-2 focus:ring-blue-500;
+  }
+
+  .score-bar {
+    @apply h-2 w-full rounded-full bg-gray-200;
+  }
+
+  .score-fill {
+    @apply h-2 rounded-full transition-all duration-500;
+  }
+}
+
+@layer utilities {
+  .text-balance {
+    overflow-wrap: break-word;
+    word-break: break-word;
+  }
+
+  .gradient-bg {
+    background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%);
+  }
+
+  .gradient-text {
+    background: linear-gradient(135deg, #2563eb, #7c3aed);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  .shadow-soft {
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03);
+  }
+
+  .shadow-hover {
+    transition: box-shadow 0.2s ease;
+  }
+
+  .shadow-hover:hover {
+    box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+  }
+}

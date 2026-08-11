@@ -1,0 +1,46 @@
+version: '3.8'
+
+services:
+  mongodb:
+    image: mongo:7
+    container_name: mock_interview_mongo
+    ports:
+      - '27017:27017'
+    volumes:
+      - mongodb_data:/data/db
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: admin
+      MONGO_INITDB_ROOT_PASSWORD: password123
+
+  backend:
+    build: ./backend
+    container_name: mock_interview_backend
+    ports:
+      - '5000:5000'
+    depends_on:
+      - mongodb
+    environment:
+      - MONGODB_URI=mongodb://admin:password123@mongodb:27017/mock_interview?authSource=admin
+      - GOOGLE_GEMINI_API_KEY=${GOOGLE_GEMINI_API_KEY:-demo-key}
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY:-demo-secret}
+      - FLASK_DEBUG=True
+      - SECRET_KEY=M5x@R1kT8v!C3nQ7pL2dH9wZ4sF6yJ0bE8uI5oA1rG7cP3mN
+    volumes:
+      - ./backend:/app
+
+  frontend:
+    build: ./frontend
+    container_name: mock_interview_frontend
+    ports:
+      - '3000:3000'
+    depends_on:
+      - backend
+    environment:
+      - NEXT_PUBLIC_API_URL=http://localhost:5000
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+      - /app/.next
+
+volumes:
+  mongodb_data:
