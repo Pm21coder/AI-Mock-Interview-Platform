@@ -56,7 +56,14 @@ def register():
         user['_id'] = f'demo_{uuid4()}'
         demo_users[email] = user
 
-    return jsonify({'token': create_token(user), 'user': {'email': user['email']}}), 201
+    return jsonify({
+        'token': create_token(user), 
+        'user': {
+            'email': user['email'],
+            'subscription_tier': user.get('subscription_tier', 'free'),
+            'subscription_status': user.get('subscription_status', 'active')
+        }
+    }), 201
 
 
 @auth_bp.route('/login', methods=['POST'])
@@ -69,4 +76,11 @@ def login():
     if not user or not bcrypt.checkpw(password.encode('utf-8'), user['password_hash'].encode('utf-8')):
         return jsonify({'error': 'Invalid email or password'}), 401
 
-    return jsonify({'token': create_token(user), 'user': {'email': user['email']}})
+    return jsonify({
+        'token': create_token(user), 
+        'user': {
+            'email': user['email'],
+            'subscription_tier': user.get('subscription_tier', 'free'),
+            'subscription_status': user.get('subscription_status', 'active')
+        }
+    })

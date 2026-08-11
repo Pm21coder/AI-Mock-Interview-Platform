@@ -48,6 +48,9 @@ export default function Navigation() {
           <Link href="/resume" className="text-gray-600 hover:text-gray-900">
             Resume Analyzer
           </Link>
+          <Link href="/subscription" className="text-gray-600 hover:text-gray-900">
+            Pricing
+          </Link>
           {email ? (
             <button onClick={signOut} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700">
               Sign out

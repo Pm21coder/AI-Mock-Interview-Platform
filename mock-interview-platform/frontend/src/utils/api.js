@@ -69,3 +69,29 @@ export const getResumeHistory = async () => {
   const response = await api.get('/api/resume/history');
   return response.data;
 };
+
+// Subscription API functions
+export const getSubscriptionStatus = async () => {
+  const response = await api.get('/api/subscription/status');
+  return response.data;
+};
+
+export const createCheckoutSession = async (data) => {
+  const response = await api.post('/api/subscription/create-checkout-session', data);
+  return response.data;
+};
+
+export const cancelSubscription = async () => {
+  const response = await api.post('/api/subscription/cancel');
+  return response.data;
+};
+
+export const reactivateSubscription = async () => {
+  const response = await api.post('/api/subscription/reactivate');
+  return response.data;
+};
+
+export const createCustomerPortal = async () => {
+  const response = await api.post('/api/subscription/portal');
+  return response.data;
+};
