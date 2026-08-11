@@ -3,17 +3,28 @@ from datetime import timedelta
 
 
 class Config:
+    # Flask Configuration
+    SECRET_KEY = os.getenv('SECRET_KEY', 'your-secret-key-change-in-production')
+    FLASK_DEBUG = os.getenv('FLASK_DEBUG', 'True').lower() == 'true'
+    
     # JWT Configuration
     JWT_SECRET_KEY = os.getenv('JWT_SECRET_KEY', 'your-secret-key-change-in-production')
     JWT_ACCESS_TOKEN_EXPIRES = timedelta(hours=24)
     
     # MongoDB Configuration
-    MONGO_URI = os.getenv('MONGO_URI', 'mongodb://localhost:27017/mock_interview_platform')
+    MONGO_URI = os.getenv('MONGODB_URI', 'mongodb://localhost:27017/mock_interview')
+    
+    # Google Gemini AI Configuration
+    GOOGLE_GEMINI_API_KEY = os.getenv('GOOGLE_GEMINI_API_KEY', '')
     
     # Stripe Configuration
     STRIPE_SECRET_KEY = os.getenv('STRIPE_SECRET_KEY', '')
     STRIPE_PUBLISHABLE_KEY = os.getenv('STRIPE_PUBLISHABLE_KEY', '')
     STRIPE_WEBHOOK_SECRET = os.getenv('STRIPE_WEBHOOK_SECRET', '')
+    
+    # UPI Configuration (for Indian users)
+    UPI_ID = os.getenv('UPI_ID', '9156727375@pthdfc')
+    UPI_NAME = os.getenv('UPI_NAME', 'Pramod Ulhas Mane')
     
     # Frontend URL
     FRONTEND_URL = os.getenv('FRONTEND_URL', 'http://localhost:3000')

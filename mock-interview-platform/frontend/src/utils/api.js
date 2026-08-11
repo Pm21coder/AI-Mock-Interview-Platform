@@ -95,3 +95,14 @@ export const createCustomerPortal = async () => {
   const response = await api.post('/api/subscription/portal');
   return response.data;
 };
+
+// UPI Payment API functions
+export const getUpiInfo = async () => {
+  const response = await api.get('/api/subscription/upi-info');
+  return response.data;
+};
+
+export const createUpiPayment = async (data) => {
+  const response = await api.post('/api/subscription/upi-payment', data);
+  return response.data;
+};

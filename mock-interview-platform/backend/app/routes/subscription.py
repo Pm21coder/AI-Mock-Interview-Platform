@@ -290,3 +290,75 @@ def create_customer_portal(current_user):
         
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+
+@subscription_bp.route('/upi-info', methods=['GET'])
+def get_upi_info():
+    """Get UPI payment information for manual transfer"""
+    return jsonify({
+        'upi_id': Config.UPI_ID,
+        'upi_name': Config.UPI_NAME,
+        'plans': {
+            'basic': {
+                'name': 'Basic Plan',
+                'price': 9,
+                'currency': 'USD',
+                'upi_amount': '₹750'  # Approximate INR amount
+            },
+            'pro': {
+                'name': 'Pro Plan',
+                'price': 19,
+                'currency': 'USD',
+                'upi_amount': '₹1580'  # Approximate INR amount
+            }
+        }
+    }), 200
+
+
+@subscription_bp.route('/upi-payment', methods=['POST'])
+@token_required
+def create_upi_payment(current_user):
+    """Create a UPI payment request and return payment details"""
+    data = request.get_json(silent=True) or {}
+    tier = data.get('tier', '').lower()
+    transaction_id = data.get('transaction_id', '')
+    
+    if tier not in ['basic', 'pro']:
+        return jsonify({'error': 'Invalid subscription tier'}), 400
+    
+    if not transaction_id:
+        return jsonify({'error': 'Transaction ID is required'}), 400
+    
+    # Get user info
+    user_data = mongo.db.users.find_one({'_id': current_user['_id']})
+    if not user_data:
+        return jsonify({'error': 'User not found'}), 404
+    
+    # Store pending subscription with transaction ID
+    # In production, you would verify the transaction with your bank/Payment gateway
+    # For now, we'll store it and mark as pending verification
+    try:
+        payment_record = {
+            'user_id': str(current_user['_id']),
+            'email': user_data['email'],
+            'tier': tier,
+            'transaction_id': transaction_id,
+            'amount': Config.SUBSCRIPTION_TIERS[tier]['price'],
+            'status': 'pending_verification',
+            'created_at': datetime.utcnow(),
+        }
+        
+        # Store in a pending_payments collection
+        mongo.db.pending_payments.insert_one(payment_record)
+        
+        return jsonify({
+            'message': 'Payment request submitted successfully',
+            'status': 'pending_verification',
+            'transaction_id': transaction_id,
+            'upi_id': Config.UPI_ID,
+            'tier': tier,
+            'note': 'Your subscription will be activated within 24 hours after payment verification'
+        }), 200
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
