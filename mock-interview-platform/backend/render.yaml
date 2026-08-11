@@ -3,13 +3,18 @@ services:
     name: mock-interview-api
     runtime: python
     plan: free
+    rootDir: mock-interview-platform/backend
     buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn run:app
+    startCommand: gunicorn --workers 1 --threads 100 --bind 0.0.0.0:$PORT run:app
     envVars:
       - key: MONGODB_URI
-        value: mongodb+srv://username:password@cluster.mongodb.net/mock_interview
+        sync: false
       - key: GOOGLE_GEMINI_API_KEY
-        value: your-gemini-api-key
+        sync: false
+      - key: RAZORPAY_KEY_ID
+        sync: false
+      - key: RAZORPAY_KEY_SECRET
+        sync: false
       - key: JWT_SECRET_KEY
         generateValue: true
       - key: SECRET_KEY
