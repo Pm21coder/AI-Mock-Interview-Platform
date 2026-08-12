@@ -1,6 +1,6 @@
 'use client';
 
-import { Suspense, useEffect, useRef, useState } from 'react';
+import { Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import toast from 'react-hot-toast';
 import Navigation from '@/components/Navigation';
@@ -8,6 +8,19 @@ import QuestionDisplay from '@/components/QuestionDisplay';
 import VideoRecorder from '@/components/VideoRecorder';
 import FeedbackDisplay from '@/components/FeedbackDisplay';
 import { getQuestions, submitAnswer, getFeedback } from '@/utils/api';
+
+function getSpeechErrorMessage(error) {
+  const messages = {
+    'not-allowed': 'Microphone access was denied. Allow microphone access in your browser settings, then try again.',
+    'service-not-allowed': 'Speech recognition is blocked by this browser or device.',
+    'audio-capture': 'No microphone was found. Connect or enable a microphone, then try again.',
+    network: 'Speech recognition needs an internet connection. Check your connection and try again.',
+    'no-speech': 'No speech was detected. Try speaking a little closer to the microphone.',
+    'language-not-supported': 'Your browser does not support speech recognition for this language.',
+  };
+
+  return messages[error] || `Voice input stopped (${error || 'unknown error'}). Please try again.`;
+}
 
 export default function InterviewSessionPage() {
   return (
@@ -42,35 +55,229 @@ function InterviewSessionContent() {
   const [sessionId, setSessionId] = useState(null);
   const [answer, setAnswer] = useState('');
   const [loadError, setLoadError] = useState('');
-  const [isListening, setIsListening] = useState(false);
+  const [speechState, setSpeechState] = useState('checking');
+  const [speechMessage, setSpeechMessage] = useState('');
   const [timeElapsed, setTimeElapsed] = useState(0);
   const recognitionRef = useRef(null);
+  const speechRunRef = useRef(0);
+  const speechStopResolverRef = useRef(null);
+  const speechStopPromiseRef = useRef(null);
+  const speechStopRequestedRef = useRef(false);
+  const speechFailedRef = useRef(false);
+  const mountedRef = useRef(true);
+  const answerRef = useRef('');
   const answerBeforeSpeechRef = useRef('');
+  const finalTranscriptRef = useRef('');
   const timerRef = useRef(null);
+  const isSpeechActive = ['starting', 'listening', 'stopping'].includes(speechState);
+  const isListening = ['starting', 'listening'].includes(speechState);
 
-  useEffect(() => {
+  const setCurrentAnswer = useCallback((nextAnswer) => {
+    answerRef.current = nextAnswer;
+    setAnswer(nextAnswer);
+  }, []);
+
+  const finishSpeechStop = useCallback(() => {
+    const resolve = speechStopResolverRef.current;
+    speechStopResolverRef.current = null;
+    speechStopPromiseRef.current = null;
+    resolve?.();
+  }, []);
+
+  const stopVoiceInput = useCallback((discard = false) => {
+    const recognition = recognitionRef.current;
+    if (!recognition) return Promise.resolve();
+
+    if (discard) {
+      speechRunRef.current += 1;
+      recognitionRef.current = null;
+      speechStopRequestedRef.current = true;
+      recognition.onstart = null;
+      recognition.onresult = null;
+      recognition.onerror = null;
+      recognition.onend = null;
+      try {
+        recognition.abort();
+      } catch {
+        // The recognition session may already have ended.
+      }
+      finishSpeechStop();
+      if (mountedRef.current) setSpeechState('idle');
+      return Promise.resolve();
+    }
+
+    if (speechStopPromiseRef.current) return speechStopPromiseRef.current;
+
+    speechStopRequestedRef.current = true;
+    if (mountedRef.current) setSpeechState('stopping');
+    const stopPromise = new Promise((resolve) => {
+      speechStopResolverRef.current = resolve;
+    });
+    speechStopPromiseRef.current = stopPromise;
+
+    try {
+      recognition.stop();
+    } catch {
+      // Calling stop after the browser ended recognition can throw. Treat it
+      // as stopped so submitting an answer is never blocked indefinitely.
+      if (recognitionRef.current === recognition) {
+        recognitionRef.current = null;
+        if (mountedRef.current) setSpeechState('idle');
+      }
+      finishSpeechStop();
+    }
+
+    return stopPromise;
+  }, [finishSpeechStop]);
+
+  const startVoiceInput = useCallback(() => {
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!SpeechRecognition) return undefined;
+    if (!SpeechRecognition) {
+      setSpeechState('unsupported');
+      setSpeechMessage('Speech recognition is not available in this browser. Use Chrome or Edge, or type your answer.');
+      toast.error('Voice input is not supported by this browser. Try Chrome or Edge.');
+      return false;
+    }
 
+    if (!window.isSecureContext) {
+      setSpeechState('idle');
+      setSpeechMessage('Voice input requires HTTPS (localhost is supported for development).');
+      toast.error('Voice input requires HTTPS.');
+      return false;
+    }
+
+    if (recognitionRef.current) return true;
+
+    const runId = ++speechRunRef.current;
     const recognition = new SpeechRecognition();
     recognition.continuous = true;
     recognition.interimResults = true;
-    recognition.lang = 'en-US';
-    recognition.onresult = (event) => {
-      const transcript = Array.from(event.results)
-        .map((result) => result[0].transcript)
-        .join('');
-      setAnswer((prevAnswer) => `${answerBeforeSpeechRef.current}${transcript}`.replace(/\s+/g, ' ').trimStart());
-    };
-    recognition.onerror = (event) => {
-      if (event.error !== 'aborted') {
-        toast.error(event.error === 'not-allowed' ? 'Microphone access was denied.' : 'Voice transcription stopped unexpectedly.');
-      }
-    };
-    recognition.onend = () => setIsListening(false);
-    recognitionRef.current = recognition;
+    recognition.lang = navigator.language || 'en-US';
+    recognition.maxAlternatives = 1;
 
-    return () => recognition.abort();
+    answerBeforeSpeechRef.current = answerRef.current.trim()
+      ? `${answerRef.current.trim()} `
+      : '';
+    finalTranscriptRef.current = '';
+    speechStopRequestedRef.current = false;
+    speechFailedRef.current = false;
+
+    const isCurrentRun = () => (
+      recognitionRef.current === recognition && speechRunRef.current === runId
+    );
+
+    recognition.onstart = () => {
+      if (!isCurrentRun() || !mountedRef.current) return;
+      setSpeechState('listening');
+      setSpeechMessage('Listening… speak clearly.');
+    };
+
+    recognition.onresult = (event) => {
+      if (!isCurrentRun() || !mountedRef.current) return;
+
+      let interimTranscript = '';
+      for (let index = event.resultIndex; index < event.results.length; index += 1) {
+        const transcript = event.results[index][0].transcript;
+        if (event.results[index].isFinal) {
+          finalTranscriptRef.current += `${transcript} `;
+        } else {
+          interimTranscript += `${transcript} `;
+        }
+      }
+
+      const combinedTranscript = `${answerBeforeSpeechRef.current}${finalTranscriptRef.current}${interimTranscript}`
+        .replace(/\s+/g, ' ')
+        .trim();
+      setCurrentAnswer(combinedTranscript);
+    };
+
+    recognition.onerror = (event) => {
+      if (!isCurrentRun()) return;
+
+      speechFailedRef.current = true;
+      speechRunRef.current += 1;
+      recognitionRef.current = null;
+      finishSpeechStop();
+      if (!mountedRef.current || event.error === 'aborted') return;
+
+      const message = getSpeechErrorMessage(event.error);
+      setSpeechState('idle');
+      setSpeechMessage(message);
+      console.warn('Speech recognition error:', event.error);
+      toast.error(message);
+    };
+
+    recognition.onend = () => {
+      if (!isCurrentRun()) return;
+
+      const wasStoppedByUser = speechStopRequestedRef.current;
+      const failed = speechFailedRef.current;
+      recognitionRef.current = null;
+      if (mountedRef.current) {
+        setSpeechState('idle');
+        if (!failed && !wasStoppedByUser) {
+          setSpeechMessage('Voice input paused. Select Start Voice Input to continue.');
+        } else if (!failed) {
+          setSpeechMessage('Voice input stopped.');
+        }
+      }
+      finishSpeechStop();
+    };
+
+    recognitionRef.current = recognition;
+    setSpeechState('starting');
+    setSpeechMessage('Requesting microphone access…');
+
+    try {
+      recognition.start();
+      return true;
+    } catch (error) {
+      recognitionRef.current = null;
+      speechRunRef.current += 1;
+      setSpeechState('idle');
+      setSpeechMessage('Voice input could not start. Please try again.');
+      console.warn('Unable to start speech recognition:', error);
+      toast.error('Voice input could not start. Please try again.');
+      return false;
+    }
+  }, [finishSpeechStop, setCurrentAnswer]);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    const speechCheckTimer = window.setTimeout(() => {
+      if (!mountedRef.current) return;
+      const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+      if (SpeechRecognition) {
+        setSpeechState('idle');
+        setSpeechMessage('Ready for voice input.');
+      } else {
+        setSpeechState('unsupported');
+        setSpeechMessage('Speech recognition is not available in this browser. Use Chrome or Edge, or type your answer.');
+      }
+    }, 0);
+
+    return () => {
+      window.clearTimeout(speechCheckTimer);
+      mountedRef.current = false;
+      speechRunRef.current += 1;
+      const recognition = recognitionRef.current;
+      recognitionRef.current = null;
+      if (recognition) {
+        recognition.onstart = null;
+        recognition.onresult = null;
+        recognition.onerror = null;
+        recognition.onend = null;
+        try {
+          recognition.abort();
+        } catch {
+          // Recognition may already have finished.
+        }
+      }
+      const resolve = speechStopResolverRef.current;
+      speechStopResolverRef.current = null;
+      speechStopPromiseRef.current = null;
+      resolve?.();
+    };
   }, []);
 
   useEffect(() => {
@@ -123,43 +330,33 @@ function InterviewSessionContent() {
   };
 
   const handleStartRecording = () => {
-    toast.success('Recording started');
+    const transcriptionStarted = startVoiceInput();
+    toast.success(transcriptionStarted ? 'Recording and transcription started.' : 'Video recording started.');
   };
 
   const toggleVoiceInput = () => {
-    const recognition = recognitionRef.current;
-    if (!recognition) {
-      toast.error('Voice input is not supported by this browser. Try Chrome or Edge.');
+    if (isSpeechActive) {
+      void stopVoiceInput();
       return;
     }
-
-    if (isListening) {
-      recognition.stop();
-      return;
-    }
-
-    answerBeforeSpeechRef.current = answer ? `${answer.trim()} ` : '';
-    try {
-      recognition.start();
-      setIsListening(true);
-    } catch {
-      toast.error('Voice input is already starting. Please try again in a moment.');
-    }
+    startVoiceInput();
   };
 
-  const handleStopRecording = async (videoBlob) => {
+  const submitCurrentAnswer = useCallback(async (videoBlob) => {
+    await stopVoiceInput();
     setIsProcessing(true);
 
     try {
       const currentQuestion = questions[currentIndex];
-      if (!answer.trim()) {
+      const submittedAnswer = answerRef.current.trim();
+      if (!submittedAnswer) {
         toast.error('Please write your answer before submitting it.');
         return;
       }
 
       const result = await submitAnswer({
         question: currentQuestion.question,
-        answer,
+        answer: submittedAnswer,
         expected_answer: currentQuestion.expected_answer,
         session_id: sessionId,
         question_index: currentIndex,
@@ -173,14 +370,18 @@ function InterviewSessionContent() {
     } finally {
       setIsProcessing(false);
     }
-  };
+  }, [currentIndex, questions, sessionId, stopVoiceInput]);
+
+  const handleStopRecording = useCallback(async (videoBlob) => {
+    await submitCurrentAnswer(videoBlob);
+  }, [submitCurrentAnswer]);
 
   const handleNextQuestion = async () => {
-    if (isListening) recognitionRef.current?.stop();
+    void stopVoiceInput(true);
     if (currentIndex < questions.length - 1) {
       setCurrentIndex((prev) => prev + 1);
       setFeedback(null);
-      setAnswer('');
+      setCurrentAnswer('');
       return;
     }
 
@@ -290,7 +491,7 @@ function InterviewSessionContent() {
             <textarea
               id="answer"
               value={answer}
-              onChange={(event) => setAnswer(event.target.value)}
+              onChange={(event) => setCurrentAnswer(event.target.value)}
               placeholder="Write the answer you gave during the recording..."
               rows={7}
               disabled={isProcessing}

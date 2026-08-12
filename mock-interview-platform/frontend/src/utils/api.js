@@ -15,6 +15,35 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
+// Practice features support guest sessions. If a token left over from an
+// earlier login has expired (or was signed with an old server secret), retry
+// the request once without it instead of blocking the interview or resume
+// workflow with a 401 response.
+api.interceptors.response.use(
+  (response) => response,
+  async (error) => {
+    const originalRequest = error.config;
+    const isPracticeRequest =
+      originalRequest?.url?.startsWith('/api/interview/') ||
+      originalRequest?.url?.startsWith('/api/resume/');
+
+    if (
+      error.response?.status === 401 &&
+      isPracticeRequest &&
+      !originalRequest._guestFallback &&
+      typeof window !== 'undefined'
+    ) {
+      originalRequest._guestFallback = true;
+      window.localStorage.removeItem('auth_token');
+      window.localStorage.removeItem('auth_email');
+      delete originalRequest.headers.Authorization;
+      return api(originalRequest);
+    }
+
+    return Promise.reject(error);
+  },
+);
+
 export const register = async (credentials) => {
   const response = await api.post('/api/auth/register', credentials);
   return response.data;
@@ -98,16 +127,5 @@ export const reactivateSubscription = async () => {
 
 export const createCustomerPortal = async () => {
   const response = await api.post('/api/subscription/portal');
-  return response.data;
-};
-
-// UPI Payment API functions
-export const getUpiInfo = async () => {
-  const response = await api.get('/api/subscription/upi-info');
-  return response.data;
-};
-
-export const createUpiPayment = async (data) => {
-  const response = await api.post('/api/subscription/upi-payment', data);
   return response.data;
 };

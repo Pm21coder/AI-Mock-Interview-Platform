@@ -10,6 +10,9 @@ from app.utils.auth import token_required
 
 resume_bp = Blueprint('resume', __name__)
 gemini_service = GeminiService()
+# Keeps guest-mode resume results available for the current backend process
+# when MongoDB cannot be reached during local development.
+demo_resumes = {}
 
 # Ensure upload directory exists
 UPLOAD_FOLDER = os.path.join(os.path.dirname(__file__), '..', '..', 'uploads')
@@ -62,6 +65,7 @@ def upload_resume():
             'analysis': analysis,
             'uploaded_at': datetime.utcnow(),
         }
+        demo_resumes[resume_document['_id']] = resume_document
         
         try:
             mongo.db.resumes.insert_one(resume_document)
@@ -124,10 +128,16 @@ def get_resume_analysis(resume_id):
     """Retrieve a previously analyzed resume."""
     
     try:
-        resume = mongo.db.resumes.find_one({
-            '_id': resume_id,
-            'user_id': str(request.current_user.get('_id', 'guest'))
-        })
+        user_id = str(request.current_user.get('_id', 'guest'))
+        resume = demo_resumes.get(resume_id)
+        if resume and resume['user_id'] != user_id:
+            resume = None
+
+        if not resume and current_app.config.get('MONGO_AVAILABLE', False):
+            resume = mongo.db.resumes.find_one({
+                '_id': resume_id,
+                'user_id': user_id,
+            })
         
         if not resume:
             return jsonify({'error': 'Resume not found'}), 404
@@ -147,25 +157,32 @@ def get_resume_analysis(resume_id):
 @token_required
 def get_resume_history():
     """Get resume analysis history for the current user."""
-    
-    try:
-        user_id = str(request.current_user.get('_id', 'guest'))
-        resumes = list(mongo.db.resumes.find(
-            {'user_id': user_id},
-            {'_id': 1, 'filename': 1, 'analysis': 1, 'uploaded_at': 1}
-        ).sort('uploaded_at', -1).limit(10))
-        
-        return jsonify({
-            'resumes': [
-                {
-                    'id': r['_id'],
-                    'filename': r['filename'],
-                    'overall_score': r.get('analysis', {}).get('overall_score', 0),
-                    'uploaded_at': r['uploaded_at'].isoformat()
-                }
-                for r in resumes
-            ]
-        })
-    
-    except Exception as exc:
-        return jsonify({'error': str(exc)}), 500
+
+    user_id = str(request.current_user.get('_id', 'guest'))
+    if current_app.config.get('MONGO_AVAILABLE', False):
+        try:
+            resumes = list(mongo.db.resumes.find(
+                {'user_id': user_id},
+                {'_id': 1, 'filename': 1, 'analysis': 1, 'uploaded_at': 1}
+            ).sort('uploaded_at', -1).limit(10))
+        except Exception:
+            resumes = []
+    else:
+        resumes = [
+            resume for resume in demo_resumes.values()
+            if resume['user_id'] == user_id
+        ]
+        resumes.sort(key=lambda resume: resume['uploaded_at'], reverse=True)
+        resumes = resumes[:10]
+
+    return jsonify({
+        'resumes': [
+            {
+                'id': resume['_id'],
+                'filename': resume['filename'],
+                'overall_score': resume.get('analysis', {}).get('overall_score', 0),
+                'uploaded_at': resume['uploaded_at'].isoformat(),
+            }
+            for resume in resumes
+        ]
+    })

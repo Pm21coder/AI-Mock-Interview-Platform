@@ -22,7 +22,9 @@ export default function AuthPage() {
       window.localStorage.setItem('auth_email', result.user.email);
       window.dispatchEvent(new Event('auth-change'));
       toast.success(isRegistering ? 'Account created.' : 'Signed in successfully.');
-      router.push('/interview/setup');
+      const params = new URLSearchParams(window.location.search);
+      const nextPath = params.get('next');
+      router.push(nextPath?.startsWith('/') ? nextPath : '/interview/setup');
     } catch (error) {
       toast.error(error.response?.data?.error || 'Authentication failed.');
     } finally {

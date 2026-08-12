@@ -14,7 +14,17 @@ def create_app(config_class=Config):
     app.config.from_object(config_class)
 
     CORS(app)
-    mongo.init_app(app)
+    # A remote MongoDB SRV record can be temporarily unavailable during local
+    # development (for example when DNS is offline).  The interview endpoints
+    # support guest sessions in memory, so do not let that optional dependency
+    # prevent Flask from starting and cause the frontend proxy connection to
+    # be reset.
+    try:
+        mongo.init_app(app)
+        app.config['MONGO_AVAILABLE'] = True
+    except Exception as exc:
+        app.config['MONGO_AVAILABLE'] = False
+        app.logger.warning('MongoDB is unavailable; starting in guest mode: %s', exc)
     socketio.init_app(app)
 
     from app.routes.interview import interview_bp

@@ -2,6 +2,7 @@ from functools import wraps
 
 import jwt
 from bson import ObjectId
+from bson.errors import InvalidId
 from flask import jsonify, request
 
 from app import mongo
@@ -28,10 +29,13 @@ def token_required(f):
             request.current_user = {'_id': 'guest', 'email': 'guest@local'}
             return f(*args, **kwargs)
 
-        token = auth_header.split(' ', 1)[1]
+        token = auth_header.split(' ', 1)[1].strip()
+        if not token:
+            return jsonify({'error': 'Missing auth token'}), 401
+
         try:
             payload = jwt.decode(token, Config.JWT_SECRET_KEY, algorithms=['HS256'])
-            user_id = payload.get('user_id')
+            user_id = str(payload.get('user_id') or '').strip()
             if not user_id:
                 return jsonify({'error': 'Invalid token payload'}), 401
 
@@ -39,12 +43,22 @@ def token_required(f):
                 request.current_user = {'_id': user_id, 'email': payload.get('email', '')}
                 return f(*args, **kwargs)
 
-            user = mongo.db.users.find_one({'_id': ObjectId(user_id)})
+            try:
+                object_id = ObjectId(user_id)
+            except (InvalidId, TypeError):
+                return jsonify({'error': 'Invalid token payload'}), 401
+
+            try:
+                user = mongo.db.users.find_one({'_id': object_id})
+            except Exception:
+                request.current_user = {'_id': user_id, 'email': payload.get('email', '')}
+                return f(*args, **kwargs)
+
             if not user:
                 return jsonify({'error': 'User not found'}), 401
             request.current_user = user
-        except Exception as exc:
-            return jsonify({'error': 'Invalid or expired token', 'details': str(exc)}), 401
+        except Exception:
+            return jsonify({'error': 'Invalid or expired token'}), 401
 
         return f(*args, **kwargs)
 

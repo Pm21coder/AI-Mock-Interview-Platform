@@ -1,14 +1,63 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import Navigation from '@/components/Navigation';
 import {
   createRazorpayOrder,
-  createUpiPayment,
   getSubscriptionStatus,
-  getUpiInfo,
   verifyRazorpayPayment,
 } from '@/utils/api';
+
+const RAZORPAY_SCRIPT_URL = 'https://checkout.razorpay.com/v1/checkout.js';
+
+const loadRazorpayScript = () => {
+  if (typeof window === 'undefined') return Promise.resolve(false);
+  if (window.Razorpay) return Promise.resolve(true);
+
+  return new Promise((resolve) => {
+    let script = document.querySelector(`script[src="${RAZORPAY_SCRIPT_URL}"]`);
+    const createdScript = !script;
+
+    if (!script) {
+      script = document.createElement('script');
+      script.src = RAZORPAY_SCRIPT_URL;
+      script.async = true;
+    }
+
+    const cleanup = () => {
+      window.clearTimeout(timeoutId);
+      script.removeEventListener('load', handleLoad);
+      script.removeEventListener('error', handleError);
+    };
+
+    const handleLoad = () => {
+      cleanup();
+      resolve(Boolean(window.Razorpay));
+    };
+
+    const handleError = () => {
+      cleanup();
+      resolve(false);
+    };
+
+    const timeoutId = window.setTimeout(() => {
+      cleanup();
+      resolve(Boolean(window.Razorpay));
+    }, 10000);
+
+    script.addEventListener('load', handleLoad);
+    script.addEventListener('error', handleError);
+
+    if (createdScript) {
+      document.body.appendChild(script);
+    }
+  });
+};
+
+const hasAuthToken = () => (
+  typeof window !== 'undefined' && Boolean(window.localStorage.getItem('auth_token'))
+);
 
 const fetchSubscriptionStatus = async (setSubscription, setLoading, setError) => {
   try {
@@ -27,74 +76,42 @@ const fetchSubscriptionStatus = async (setSubscription, setLoading, setError) =>
 };
 
 export default function SubscriptionPage() {
+  const router = useRouter();
   const [subscription, setSubscription] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [processing, setProcessing] = useState(false);
-  const [showUpiModal, setShowUpiModal] = useState(false);
-  const [selectedTier, setSelectedTier] = useState(null);
-  const [upiInfo, setUpiInfo] = useState(null);
-  const [transactionId, setTransactionId] = useState('');
-  const [upiProcessing, setUpiProcessing] = useState(false);
+  const [processingTier, setProcessingTier] = useState(null);
 
   useEffect(() => {
     fetchSubscriptionStatus(setSubscription, setLoading, setError);
   }, [setSubscription, setLoading, setError]);
 
-  const handleUpiPayment = async (tier) => {
-    setSelectedTier(tier);
-    setShowUpiModal(true);
-    // Fetch UPI info
-    try {
-      const data = await getUpiInfo();
-      setUpiInfo(data);
-    } catch (err) {
-      console.error('UPI info error:', err);
-      setError(err.response?.data?.error || err.message || 'Failed to load UPI information');
-    }
-  };
-
-  const submitUpiPayment = async () => {
-    if (!transactionId.trim()) {
-      setError('Please enter transaction ID');
-      return;
-    }
-
-    try {
-      setUpiProcessing(true);
-      const data = await createUpiPayment({
-        tier: selectedTier,
-        transaction_id: transactionId
-      });
-      
-      if (data.message) {
-        alert('Payment request submitted! Your subscription will be activated within 24 hours after verification.');
-        setShowUpiModal(false);
-        setTransactionId('');
-        setSelectedTier(null);
-      }
-    } catch (err) {
-      setError('Failed to submit payment request');
-    } finally {
-      setUpiProcessing(false);
-    }
-  };
-
   const handleRazorpayCheckout = async (tier) => {
-    if (!window.Razorpay) {
-      setError('Razorpay checkout is still loading. Please try again in a moment.');
+    if (!hasAuthToken()) {
+      setError('Please sign in before making a payment.');
+      router.push('/auth?next=/subscription');
       return;
     }
 
     try {
       setProcessing(true);
+      setProcessingTier(tier);
       setError(null);
+      const scriptLoaded = await loadRazorpayScript();
+
+      if (!scriptLoaded || !window.Razorpay) {
+        throw new Error('Unable to load Razorpay checkout. Please refresh and try again.');
+      }
+
       const data = await createRazorpayOrder({ tier });
-      const key = process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID || data.key_id;
+      const key = data.key_id || process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID;
 
       if (!data.order_id || !key) {
         throw new Error(data.error || 'Unable to initialize Razorpay checkout');
       }
+
+      const authEmail = window.localStorage.getItem('auth_email') || '';
 
       const razorpay = new window.Razorpay({
           key,
@@ -103,6 +120,12 @@ export default function SubscriptionPage() {
           amount: data.amount,
           name: 'MockInterview AI',
           description: `${tier === 'basic' ? 'Basic' : 'Pro'} plan subscription`,
+          prefill: {
+            email: authEmail,
+          },
+          notes: {
+            subscription_tier: tier,
+          },
           handler: async (response) => {
             try {
               const result = await verifyRazorpayPayment({
@@ -119,11 +142,13 @@ export default function SubscriptionPage() {
               setError(err.response?.data?.error || err.message || 'Payment verification failed');
             } finally {
               setProcessing(false);
+              setProcessingTier(null);
             }
           },
           modal: {
             ondismiss: () => {
               setProcessing(false);
+              setProcessingTier(null);
               setError('Payment was cancelled.');
             },
           },
@@ -133,11 +158,22 @@ export default function SubscriptionPage() {
         });
       razorpay.on('payment.failed', (response) => {
         setProcessing(false);
+        setProcessingTier(null);
         setError(response.error?.description || 'Payment failed. Please try again.');
       });
       razorpay.open();
     } catch (err) {
       setProcessing(false);
+      setProcessingTier(null);
+
+      if (err.response?.status === 401) {
+        window.localStorage.removeItem('auth_token');
+        window.localStorage.removeItem('auth_email');
+        setError('Your session expired. Please sign in again before making a payment.');
+        router.push('/auth?next=/subscription');
+        return;
+      }
+
       setError(err.response?.data?.error || err.message || 'Failed to initiate Razorpay payment');
     }
   };
@@ -200,19 +236,7 @@ export default function SubscriptionPage() {
 
   // Initialize Razorpay script
   useEffect(() => {
-    if (window.Razorpay) {
-      return undefined;
-    }
-
-    const script = document.createElement('script');
-    script.src = 'https://checkout.razorpay.com/v1/checkout.js';
-    script.onerror = () => {
-      setError('Unable to load Razorpay checkout. Please refresh and try again.');
-    };
-    document.body.appendChild(script);
-    return () => {
-      script.remove();
-    };
+    loadRazorpayScript();
   }, []);
 
   if (loading) {
@@ -294,7 +318,7 @@ export default function SubscriptionPage() {
               <div className="mb-6">
                 <h3 className="mb-2 text-2xl font-bold text-gray-900">{plan.name}</h3>
                 <div className="flex items-baseline gap-2">
-                  <span className="text-4xl font-bold text-gray-900">$${plan.price}</span>
+                  <span className="text-4xl font-bold text-gray-900">${plan.price}</span>
                   <span className="text-lg text-gray-600">/ {plan.interval}</span>
                 </div>
                 {plan.price > 0 && (
@@ -328,7 +352,7 @@ export default function SubscriptionPage() {
                 ))}
               </ul>
 
-              <div className="space-y-2">
+              <div>
                 <button
                   onClick={() => handleRazorpayCheckout(plan.id)}
                   disabled={plan.disabled || processing}
@@ -340,101 +364,14 @@ export default function SubscriptionPage() {
                       : 'bg-gray-900 text-white hover:bg-gray-800'
                   }`}
                 >
-                  {processing && plan.id === subscription?.tier ? 'Processing...' : plan.cta}
+                  {processing && processingTier === plan.id
+                    ? 'Processing...'
+                    : plan.cta}
                 </button>
-                
-                {!plan.disabled && plan.id !== 'free' && (
-                  <button
-                    onClick={() => handleUpiPayment(plan.id)}
-                    className="w-full rounded-lg border-2 border-blue-600 py-3 px-4 font-semibold text-blue-600 hover:bg-blue-50 transition-colors"
-                  >
-                    Pay with UPI
-                  </button>
-                )}
-
               </div>
             </div>
           ))}
         </div>
-
-        {/* UPI Payment Modal */}
-        {showUpiModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
-            <div className="max-w-md rounded-xl bg-white p-8 shadow-2xl">
-              <div className="mb-6 flex items-center justify-between">
-                <h3 className="text-2xl font-bold text-gray-900">Pay with UPI</h3>
-                <button
-                  onClick={() => setShowUpiModal(false)}
-                  className="text-gray-400 hover:text-gray-600"
-                >
-                  <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                </button>
-              </div>
-
-              {upiInfo && (
-                <>
-                  <div className="mb-6 rounded-lg bg-blue-50 p-4">
-                    <p className="text-sm font-semibold text-blue-900">Selected Plan: {upiInfo.plans[selectedTier]?.name}</p>
-                    <p className="text-lg font-bold text-blue-700">{upiInfo.plans[selectedTier]?.upi_amount}</p>
-                  </div>
-
-                  <div className="mb-6">
-                    <p className="mb-2 text-sm font-medium text-gray-700">Scan QR Code or use UPI ID:</p>
-                    <div className="rounded-lg bg-gray-50 p-4 text-center">
-                      <p className="text-lg font-mono font-semibold text-gray-900">{upiInfo.upi_id}</p>
-                      <p className="text-sm text-gray-600">{upiInfo.upi_name}</p>
-                    </div>
-                  </div>
-
-                  <div className="mb-6 rounded-lg bg-yellow-50 border border-yellow-200 p-4">
-                    <p className="text-sm text-yellow-800">
-                      <strong>Instructions:</strong>
-                    </p>
-                    <ol className="mt-2 list-inside list-decimal text-sm text-yellow-700">
-                      <li>Open any UPI app (Paytm, GPay, PhonePe, etc.)</li>
-                      <li>Scan QR code or enter UPI ID: {upiInfo.upi_id}</li>
-                      <li>Pay amount: {upiInfo.plans[selectedTier]?.upi_amount}</li>
-                      <li>Copy the transaction ID from your payment app</li>
-                      <li>Paste it below and submit</li>
-                    </ol>
-                  </div>
-
-                  <div className="mb-6">
-                    <label className="mb-2 block text-sm font-medium text-gray-700">
-                      Transaction ID <span className="text-red-500">*</span>
-                    </label>
-                    <input
-                      type="text"
-                      value={transactionId}
-                      onChange={(e) => setTransactionId(e.target.value)}
-                      placeholder="Enter your UPI transaction ID"
-                      className="w-full rounded-lg border border-gray-300 px-4 py-2 focus:border-blue-500 focus:outline-none"
-                      required
-                    />
-                  </div>
-
-                  <div className="flex gap-3">
-                    <button
-                      onClick={() => setShowUpiModal(false)}
-                      className="flex-1 rounded-lg border border-gray-300 py-3 px-4 font-semibold text-gray-700 hover:bg-gray-50"
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      onClick={submitUpiPayment}
-                      disabled={upiProcessing}
-                      className="flex-1 rounded-lg bg-blue-600 py-3 px-4 font-semibold text-white hover:bg-blue-700 disabled:bg-blue-400"
-                    >
-                      {upiProcessing ? 'Submitting...' : 'Submit Payment'}
-                    </button>
-                  </div>
-                </>
-              )}
-            </div>
-          </div>
-        )}
 
         {/* FAQ Section */}
         <div className="mt-16 rounded-xl bg-white p-8 shadow-lg">

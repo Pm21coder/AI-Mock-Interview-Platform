@@ -11,7 +11,7 @@ from app.config import Config
 class GeminiService:
     def __init__(self):
         api_key = Config.GOOGLE_GEMINI_API_KEY
-        if genai and api_key and api_key != 'demo-key':
+        if genai and Config.ENABLE_GEMINI and api_key and api_key != 'demo-key':
             genai.configure(api_key=api_key)
             self.model = genai.GenerativeModel(Config.GOOGLE_GEMINI_MODEL)
         else:
@@ -35,11 +35,17 @@ class GeminiService:
             return self.get_fallback_questions(job_role, category, num_questions)
 
         try:
-            response = self.model.generate_content(prompt)
+            response = self.model.generate_content(
+                prompt,
+                request_options={'timeout': Config.GEMINI_TIMEOUT_SECONDS},
+            )
             text = getattr(response, 'text', '')
             if not text:
                 return self.get_fallback_questions(job_role, category, num_questions)
-            return self._parse_json_response(text)
+            questions = self._parse_json_response(text)
+            if not isinstance(questions, list):
+                raise ValueError('Gemini returned questions in an invalid format')
+            return questions
         except Exception as exc:
             print(f'Error generating questions: {exc}')
             return self.get_fallback_questions(job_role, category, num_questions)
@@ -74,11 +80,17 @@ class GeminiService:
             return self.get_fallback_feedback()
 
         try:
-            response = self.model.generate_content(prompt)
+            response = self.model.generate_content(
+                prompt,
+                request_options={'timeout': Config.GEMINI_TIMEOUT_SECONDS},
+            )
             text = getattr(response, 'text', '')
             if not text:
                 return self.get_fallback_feedback()
-            return self._parse_json_response(text)
+            feedback = self._parse_json_response(text)
+            if not isinstance(feedback, dict):
+                raise ValueError('Gemini returned feedback in an invalid format')
+            return feedback
         except Exception as exc:
             print(f'Error analyzing answer: {exc}')
             return self.get_fallback_feedback()
@@ -258,11 +270,17 @@ class GeminiService:
             return self.get_fallback_resume_analysis()
 
         try:
-            response = self.model.generate_content(prompt)
+            response = self.model.generate_content(
+                prompt,
+                request_options={'timeout': Config.GEMINI_TIMEOUT_SECONDS},
+            )
             text = getattr(response, 'text', '')
             if not text:
                 return self.get_fallback_resume_analysis()
-            return self._parse_json_response(text)
+            analysis = self._parse_json_response(text)
+            if not isinstance(analysis, dict):
+                raise ValueError('Gemini returned resume analysis in an invalid format')
+            return analysis
         except Exception as exc:
             print(f'Error analyzing resume: {exc}')
             return self.get_fallback_resume_analysis()

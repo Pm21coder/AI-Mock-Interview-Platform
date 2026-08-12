@@ -3,14 +3,17 @@ import hmac
 import hashlib
 
 import razorpay
-from flask import Blueprint, jsonify, request
-from razorpay.errors import BadRequestError
+from flask import Blueprint, current_app, jsonify, request
+from razorpay.errors import BadRequestError, GatewayError, ServerError
 
 from app import mongo
 from app.config import Config
 from app.utils.auth import token_required
 
 subscription_bp = Blueprint('subscription', __name__)
+
+fallback_razorpay_orders = {}
+fallback_subscriptions = {}
 
 # Initialize the Razorpay client. Credentials come from environment variables
 # (Config.RAZORPAY_KEY_ID / RAZORPAY_KEY_SECRET) so that secrets are never
@@ -24,16 +27,69 @@ def _get_current_user():
 
 
 def _is_real_user(user):
-    """True when the user is backed by MongoDB (not a guest/demo account)."""
+    """True when a request has an authenticated account, including fallback accounts."""
     if not user:
         return False
     user_id = str(user.get('_id', ''))
-    return user_id != 'guest' and not user_id.startswith('demo_')
+    return user_id != 'guest'
 
 
 def _order_amount_for_tier(tier):
     """Return the order amount (in paise) for the given tier, or None."""
     return Config.RAZORPAY_ORDER_AMOUNTS.get(tier)
+
+
+def _razorpay_order_error_response(exc):
+    """Return a user-safe response for Razorpay order creation failures."""
+    error_message = str(exc).lower()
+    if any(term in error_message for term in ('auth', 'credential', 'key')):
+        return jsonify({
+            'error': 'Razorpay authentication failed. Check your key id and key secret.'
+        }), 401
+    if isinstance(exc, (GatewayError, ServerError)):
+        return jsonify({
+            'error': 'Razorpay is temporarily unavailable. Please try again in a moment.'
+        }), 502
+    return jsonify({'error': 'Razorpay could not create the order'}), 500
+
+
+def _subscription_status_payload(tier, status='active', interviews_used=0,
+                                 start_date=None, end_date=None):
+    """Build the subscription status response for Mongo and fallback users."""
+    plan_info = Config.SUBSCRIPTION_TIERS.get(tier, Config.SUBSCRIPTION_TIERS['free'])
+    monthly_limit = plan_info['monthly_interviews']
+    interviews_remaining = (
+        max(0, monthly_limit - interviews_used)
+        if monthly_limit != float('inf')
+        else 'unlimited'
+    )
+    monthly_limit_response = monthly_limit if monthly_limit != float('inf') else 'unlimited'
+
+    return {
+        'tier': tier,
+        'status': status,
+        'interviews_used_this_month': interviews_used,
+        'interviews_remaining': interviews_remaining,
+        'monthly_limit': monthly_limit_response,
+        'features': plan_info['features'],
+        'subscription_start_date': start_date,
+        'subscription_end_date': end_date,
+    }
+
+
+def _store_fallback_subscription(user_id, tier, razorpay_order_id=None,
+                                 razorpay_payment_id=None):
+    """Activate a paid plan in memory when MongoDB is unavailable locally."""
+    start_date = datetime.utcnow()
+    fallback_subscriptions[str(user_id)] = {
+        'tier': tier,
+        'status': 'active',
+        'interviews_used_this_month': 0,
+        'subscription_start_date': start_date,
+        'subscription_end_date': start_date + timedelta(days=30),
+        'razorpay_order_id': razorpay_order_id,
+        'razorpay_payment_id': razorpay_payment_id,
+    }
 
 
 @subscription_bp.route('/plans', methods=['GET'])
@@ -53,31 +109,25 @@ def get_subscription_status():
 
     # Handle guest users (no account) - return free tier by default
     if user_id == 'guest':
-        plan_info = Config.SUBSCRIPTION_TIERS['free']
-        return jsonify({
-            'tier': 'free',
-            'status': 'active',
-            'interviews_used_this_month': 0,
-            'interviews_remaining': plan_info['monthly_interviews'],
-            'monthly_limit': plan_info['monthly_interviews'],
-            'features': plan_info['features'],
-            'subscription_start_date': None,
-            'subscription_end_date': None,
-        }), 200
+        return jsonify(_subscription_status_payload('free')), 200
+
+    fallback_subscription = fallback_subscriptions.get(str(user_id))
+    if fallback_subscription:
+        end_date = fallback_subscription.get('subscription_end_date')
+        if end_date and datetime.utcnow() > end_date:
+            fallback_subscriptions.pop(str(user_id), None)
+        else:
+            return jsonify(_subscription_status_payload(
+                fallback_subscription.get('tier', 'free'),
+                fallback_subscription.get('status', 'active'),
+                fallback_subscription.get('interviews_used_this_month', 0),
+                fallback_subscription.get('subscription_start_date'),
+                fallback_subscription.get('subscription_end_date'),
+            )), 200
 
     # Handle demo users (stored in memory, not MongoDB)
     if str(user_id).startswith('demo_'):
-        plan_info = Config.SUBSCRIPTION_TIERS['free']
-        return jsonify({
-            'tier': 'free',
-            'status': 'active',
-            'interviews_used_this_month': 0,
-            'interviews_remaining': plan_info['monthly_interviews'],
-            'monthly_limit': plan_info['monthly_interviews'],
-            'features': plan_info['features'],
-            'subscription_start_date': None,
-            'subscription_end_date': None,
-        }), 200
+        return jsonify(_subscription_status_payload('free')), 200
 
     try:
         user_data = mongo.db.users.find_one({'_id': user_id})
@@ -85,17 +135,7 @@ def get_subscription_status():
         user_data = None
 
     if not user_data:
-        plan_info = Config.SUBSCRIPTION_TIERS['free']
-        return jsonify({
-            'tier': 'free',
-            'status': 'active',
-            'interviews_used_this_month': 0,
-            'interviews_remaining': plan_info['monthly_interviews'],
-            'monthly_limit': plan_info['monthly_interviews'],
-            'features': plan_info['features'],
-            'subscription_start_date': None,
-            'subscription_end_date': None,
-        }), 200
+        return jsonify(_subscription_status_payload('free')), 200
 
     tier = user_data.get('subscription_tier', 'free')
     plan_info = Config.SUBSCRIPTION_TIERS.get(tier, Config.SUBSCRIPTION_TIERS['free'])
@@ -158,55 +198,57 @@ def create_razorpay_order():
     if not amount or amount < 100:
         return jsonify({'error': 'Order amount must be at least 100 paise'}), 400
 
-    # Fall back to UPI when Razorpay is not configured yet (matches the
-    # behaviour previously offered while Stripe was unconfigured).
     if not Config.RAZORPAY_KEY_ID or not Config.RAZORPAY_KEY_SECRET:
         return jsonify({
-            'error': 'Razorpay is not configured yet. Please use UPI payment or contact support.',
-            'upi_available': True,
-            'tier': tier,
-            'upi_info': {
-                'upi_id': Config.UPI_ID,
-                'upi_name': Config.UPI_NAME,
-                'amount': Config.UPI_AMOUNTS.get(tier, ''),
-                'price': Config.SUBSCRIPTION_TIERS[tier]['price']
-            }
+            'error': 'Razorpay is not configured yet. Add Razorpay key id and secret to enable payments.'
         }), 501
 
+    receipt = 'sub_{}_{}_{}'.format(
+        tier[:1],
+        hashlib.sha1(str(current_user['_id']).encode('utf-8')).hexdigest()[:8],
+        int(datetime.utcnow().timestamp())
+    )
+
     try:
-        order = razorpay_client.order.create({
+        order = razorpay_client.order.create(data={
             'amount': amount,
             'currency': Config.RAZORPAY_CURRENCY,
-            'receipt': 'sub_{}_{}_{}'.format(
-                tier, str(current_user['_id']), int(datetime.utcnow().timestamp())
-            ),
+            'receipt': receipt,
             'payment_capture': 1,
+            'notes': {
+                'subscription_tier': tier,
+                'user_id': str(current_user['_id']),
+                'email': current_user.get('email', ''),
+            },
         })
-    except BadRequestError as exc:
-        error_message = str(exc)
-        if any(term in error_message.lower() for term in ('auth', 'credential', 'key')):
-            return jsonify({'error': 'Razorpay authentication failed'}), 401
-        return jsonify({'error': 'Razorpay could not create the order'}), 500
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+    except (BadRequestError, GatewayError, ServerError) as exc:
+        return _razorpay_order_error_response(exc)
+    except Exception:
+        current_app.logger.exception('Unexpected Razorpay order creation failure')
+        return jsonify({
+            'error': 'Unable to contact Razorpay. Please try again in a moment.'
+        }), 502
 
     # Persist the order -> tier mapping so the correct plan is activated after
     # signature verification, without trusting any client-supplied value.
+    order_record = {
+        'order_id': order['id'],
+        'user_id': str(current_user['_id']),
+        'email': current_user.get('email', ''),
+        'tier': tier,
+        'amount': order['amount'],
+        'currency': order['currency'],
+        'status': 'created',
+        'created_at': datetime.utcnow(),
+    }
+    fallback_razorpay_orders[order['id']] = order_record.copy()
+
     try:
-        mongo.db.razorpay_orders.insert_one({
-            'order_id': order['id'],
-            'user_id': str(current_user['_id']),
-            'email': current_user.get('email', ''),
-            'tier': tier,
-            'amount': order['amount'],
-            'currency': order['currency'],
-            'status': 'created',
-            'created_at': datetime.utcnow(),
-        })
+        mongo.db.razorpay_orders.insert_one(order_record)
     except Exception:
-        # Do not expose an order that cannot be associated with the user and
-        # plan during verification.
-        return jsonify({'error': 'Unable to prepare the payment order'}), 500
+        # Local/demo mode can still verify the payment against the in-memory
+        # order above. A production deployment should keep MongoDB available.
+        pass
 
     return jsonify({
         'order_id': order['id'],
@@ -236,11 +278,34 @@ def verify_razorpay_payment():
     if not all([razorpay_order_id, razorpay_payment_id, razorpay_signature]):
         return jsonify({'error': 'Missing required payment fields'}), 400
 
+    if not _is_real_user(current_user):
+        return jsonify({'error': 'Please sign in with an account before making a payment'}), 401
+
     if not Config.RAZORPAY_KEY_SECRET:
         return jsonify({'error': 'Razorpay is not configured'}), 500
 
+    try:
+        order_record = mongo.db.razorpay_orders.find_one({'order_id': razorpay_order_id})
+    except Exception:
+        order_record = None
+
+    if not order_record:
+        order_record = fallback_razorpay_orders.get(razorpay_order_id)
+
+    if not order_record or str(order_record.get('user_id')) != str(current_user.get('_id')):
+        return jsonify({'error': 'Payment order was not found for this user'}), 400
+
+    if order_record.get('status') == 'paid':
+        return jsonify({'error': 'Payment has already been processed'}), 400
+
+    server_order_id = order_record.get('order_id')
+    tier = order_record.get('tier')
+
+    if tier not in ['basic', 'pro'] or not server_order_id:
+        return jsonify({'error': 'Payment order has an invalid plan'}), 400
+
     # --- Signature verification (HMAC-SHA256) ---
-    msg = '{}|{}'.format(razorpay_order_id, razorpay_payment_id)
+    msg = '{}|{}'.format(server_order_id, razorpay_payment_id)
     expected_signature = hmac.new(
         Config.RAZORPAY_KEY_SECRET.encode('utf-8'),
         msg.encode('utf-8'),
@@ -251,23 +316,11 @@ def verify_razorpay_payment():
         # Signature mismatch: do NOT mark the subscription as paid.
         return jsonify({'error': 'Signature verification failed'}), 400
 
-    # --- Activate subscription (only for real MongoDB-backed users) ---
-    try:
-        order_record = mongo.db.razorpay_orders.find_one({'order_id': razorpay_order_id})
-    except Exception:
-        order_record = None
-
-    if not order_record or str(order_record.get('user_id')) != str(current_user.get('_id')):
-        return jsonify({'error': 'Payment order was not found for this user'}), 400
-
-    if order_record.get('status') == 'paid':
-        return jsonify({'error': 'Payment has already been processed'}), 400
-
-    tier = order_record.get('tier')
-
-    if _is_real_user(current_user) and tier in ['basic', 'pro']:
+    # --- Activate subscription ---
+    if tier in ['basic', 'pro']:
+        activated_in_mongo = False
         try:
-            mongo.db.users.update_one(
+            result = mongo.db.users.update_one(
                 {'_id': current_user['_id']},
                 {
                     '$set': {
@@ -281,14 +334,26 @@ def verify_razorpay_payment():
                     }
                 }
             )
-            mongo.db.razorpay_orders.update_one(
-                {'order_id': razorpay_order_id},
-                {'$set': {'status': 'paid', 'payment_id': razorpay_payment_id}}
-            )
+            activated_in_mongo = result.matched_count > 0
         except Exception:
-            return jsonify({
-                'error': 'Payment verified but subscription could not be activated'
-            }), 500
+            activated_in_mongo = False
+
+        if activated_in_mongo:
+            try:
+                mongo.db.razorpay_orders.update_one(
+                    {'order_id': razorpay_order_id},
+                    {'$set': {'status': 'paid', 'payment_id': razorpay_payment_id}}
+                )
+            except Exception:
+                pass
+        else:
+            _store_fallback_subscription(
+                current_user['_id'], tier, razorpay_order_id, razorpay_payment_id
+            )
+
+        if razorpay_order_id in fallback_razorpay_orders:
+            fallback_razorpay_orders[razorpay_order_id]['status'] = 'paid'
+            fallback_razorpay_orders[razorpay_order_id]['payment_id'] = razorpay_payment_id
 
     return jsonify({
         'status': 'success',
@@ -328,78 +393,5 @@ def cancel_subscription():
         return jsonify({
             'message': 'Subscription canceled. You are now on the free plan.'
         }), 200
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-
-@subscription_bp.route('/upi-info', methods=['GET'])
-def get_upi_info():
-    """Get UPI payment information for manual transfer"""
-    return jsonify({
-        'upi_id': Config.UPI_ID,
-        'upi_name': Config.UPI_NAME,
-        'plans': {
-            'basic': {
-                'name': 'Basic Plan',
-                'price': Config.SUBSCRIPTION_TIERS['basic']['price'],
-                'currency': 'USD',
-                'upi_amount': Config.UPI_AMOUNTS['basic']
-            },
-            'pro': {
-                'name': 'Pro Plan',
-                'price': Config.SUBSCRIPTION_TIERS['pro']['price'],
-                'currency': 'USD',
-                'upi_amount': Config.UPI_AMOUNTS['pro']
-            }
-        }
-    }), 200
-
-
-@subscription_bp.route('/upi-payment', methods=['POST'])
-@token_required
-def create_upi_payment():
-    """Create a UPI payment request and return payment details"""
-    current_user = _get_current_user()
-    data = request.get_json(silent=True) or {}
-    tier = data.get('tier', '').lower()
-    transaction_id = data.get('transaction_id', '')
-
-    if tier not in ['basic', 'pro']:
-        return jsonify({'error': 'Invalid subscription tier'}), 400
-
-    if not transaction_id:
-        return jsonify({'error': 'Transaction ID is required'}), 400
-
-    # Get user info
-    user_data = mongo.db.users.find_one({'_id': current_user['_id']})
-    if not user_data:
-        return jsonify({'error': 'User not found'}), 404
-
-    # Store pending subscription with transaction ID
-    # In production, you would verify the transaction with your bank/Payment gateway
-    # For now, we'll store it and mark as pending verification
-    try:
-        payment_record = {
-            'user_id': str(current_user['_id']),
-            'email': user_data['email'],
-            'tier': tier,
-            'transaction_id': transaction_id,
-            'amount': Config.SUBSCRIPTION_TIERS[tier]['price'],
-            'status': 'pending_verification',
-            'created_at': datetime.utcnow(),
-        }
-
-        # Store in a pending_payments collection
-        mongo.db.pending_payments.insert_one(payment_record)
-
-        return jsonify({
-            'message': 'Payment request submitted successfully',
-            'status': 'pending_verification',
-            'transaction_id': transaction_id,
-            'upi_id': Config.UPI_ID,
-            'tier': tier,
-            'note': 'Your subscription will be activated within 24 hours after payment verification'
-        }), 200
-
     except Exception as e:
         return jsonify({'error': str(e)}), 500
