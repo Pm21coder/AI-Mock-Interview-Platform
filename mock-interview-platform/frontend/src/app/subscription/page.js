@@ -15,15 +15,19 @@ const loadRazorpayScript = () => {
   if (typeof window === 'undefined') return Promise.resolve(false);
   if (window.Razorpay) return Promise.resolve(true);
 
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     let script = document.querySelector(`script[src="${RAZORPAY_SCRIPT_URL}"]`);
     const createdScript = !script;
 
     if (!script) {
       script = document.createElement('script');
       script.src = RAZORPAY_SCRIPT_URL;
+      // Keep async but set crossorigin to reduce CSP-related issues
       script.async = true;
+      script.crossOrigin = 'anonymous';
     }
+
+    let resolved = false;
 
     const cleanup = () => {
       window.clearTimeout(timeoutId);
@@ -32,18 +36,34 @@ const loadRazorpayScript = () => {
     };
 
     const handleLoad = () => {
-      cleanup();
-      resolve(Boolean(window.Razorpay));
+      // Allow a short moment for the global to be defined
+      setTimeout(() => {
+        cleanup();
+        if (window.Razorpay) {
+          resolved = true;
+          resolve(true);
+        } else {
+          resolved = true;
+          reject(new Error('Razorpay SDK loaded but window.Razorpay is undefined. Check CSP/ad-blockers.'));
+        }
+      }, 200);
     };
 
     const handleError = () => {
       cleanup();
-      resolve(false);
+      resolved = true;
+      reject(new Error('Failed to load Razorpay SDK (network error or blocked by extension).'));
     };
 
     const timeoutId = window.setTimeout(() => {
-      cleanup();
-      resolve(Boolean(window.Razorpay));
+      if (!resolved) {
+        cleanup();
+        if (window.Razorpay) {
+          resolve(true);
+        } else {
+          reject(new Error('Timed out loading Razorpay SDK. Possible network/CSP/adblock interference.'));
+        }
+      }
     }, 10000);
 
     script.addEventListener('load', handleLoad);
@@ -101,7 +121,7 @@ export default function SubscriptionPage() {
       const scriptLoaded = await loadRazorpayScript();
 
       if (!scriptLoaded || !window.Razorpay) {
-        throw new Error('Unable to load Razorpay checkout. Please refresh and try again.');
+        throw new Error('Unable to load Razorpay checkout script. You can use Demo Upgrade mode below.');
       }
 
       const data = await createRazorpayOrder({ tier });
@@ -114,48 +134,48 @@ export default function SubscriptionPage() {
       const authEmail = window.localStorage.getItem('auth_email') || '';
 
       const razorpay = new window.Razorpay({
-          key,
-          order_id: data.order_id,
-          currency: data.currency || 'INR',
-          amount: data.amount,
-          name: 'MockInterview AI',
-          description: `${tier === 'basic' ? 'Basic' : 'Pro'} plan subscription`,
-          prefill: {
-            email: authEmail,
-          },
-          notes: {
-            subscription_tier: tier,
-          },
-          handler: async (response) => {
-            try {
-              const result = await verifyRazorpayPayment({
-                razorpay_order_id: response.razorpay_order_id,
-                razorpay_payment_id: response.razorpay_payment_id,
-                razorpay_signature: response.razorpay_signature,
-              });
-              if (result.status !== 'success') {
-                throw new Error(result.error || 'Payment verification failed');
-              }
-              await fetchSubscriptionStatus(setSubscription, setLoading, setError);
-              alert('Payment verified successfully! Your subscription is now active.');
-            } catch (err) {
-              setError(err.response?.data?.error || err.message || 'Payment verification failed');
-            } finally {
-              setProcessing(false);
-              setProcessingTier(null);
+        key,
+        order_id: data.order_id,
+        currency: data.currency || 'INR',
+        amount: data.amount,
+        name: 'MockInterview AI',
+        description: `${tier === 'basic' ? 'Basic' : 'Pro'} plan subscription`,
+        prefill: {
+          email: authEmail,
+        },
+        notes: {
+          subscription_tier: tier,
+        },
+        handler: async (response) => {
+          try {
+            const result = await verifyRazorpayPayment({
+              razorpay_order_id: response.razorpay_order_id,
+              razorpay_payment_id: response.razorpay_payment_id,
+              razorpay_signature: response.razorpay_signature,
+            });
+            if (result.status !== 'success') {
+              throw new Error(result.error || 'Payment verification failed');
             }
+            await fetchSubscriptionStatus(setSubscription, setLoading, setError);
+            alert('Payment verified successfully! Your subscription is now active.');
+          } catch (err) {
+            setError(err.response?.data?.error || err.message || 'Payment verification failed');
+          } finally {
+            setProcessing(false);
+            setProcessingTier(null);
+          }
+        },
+        modal: {
+          ondismiss: () => {
+            setProcessing(false);
+            setProcessingTier(null);
+            setError('Payment was cancelled.');
           },
-          modal: {
-            ondismiss: () => {
-              setProcessing(false);
-              setProcessingTier(null);
-              setError('Payment was cancelled.');
-            },
-          },
-          theme: {
-            color: '#2563eb',
-          },
-        });
+        },
+        theme: {
+          color: '#2563eb',
+        },
+      });
       razorpay.on('payment.failed', (response) => {
         setProcessing(false);
         setProcessingTier(null);
@@ -166,7 +186,15 @@ export default function SubscriptionPage() {
       setProcessing(false);
       setProcessingTier(null);
 
-      if (err.response?.status === 401) {
+      const serverMsg = err.response?.data?.error || err.message || '';
+      const isAuthError = err.response?.status === 401 && (
+        serverMsg.toLowerCase().includes('token') ||
+        serverMsg.toLowerCase().includes('expired') ||
+        serverMsg.toLowerCase().includes('user not found') ||
+        serverMsg.toLowerCase().includes('sign in with an account')
+      );
+
+      if (isAuthError) {
         window.localStorage.removeItem('auth_token');
         window.localStorage.removeItem('auth_email');
         setError('Your session expired. Please sign in again before making a payment.');
@@ -174,7 +202,44 @@ export default function SubscriptionPage() {
         return;
       }
 
-      setError(err.response?.data?.error || err.message || 'Failed to initiate Razorpay payment');
+      setError(serverMsg || 'Failed to initiate Razorpay payment');
+    }
+  };
+
+  const handleDemoUpgrade = async (tier) => {
+    if (!hasAuthToken()) {
+      setError('Please sign in before making a payment.');
+      router.push('/auth?next=/subscription');
+      return;
+    }
+
+    try {
+      setProcessing(true);
+      setProcessingTier(tier);
+      setError(null);
+
+      const data = await createRazorpayOrder({ tier, demo_mode: true });
+      if (!data.order_id) {
+        throw new Error(data.error || 'Unable to create demo order');
+      }
+
+      const result = await verifyRazorpayPayment({
+        razorpay_order_id: data.order_id,
+        razorpay_payment_id: 'pay_demo_123',
+        razorpay_signature: 'demo_signature',
+      });
+
+      if (result.status !== 'success') {
+        throw new Error(result.error || 'Demo payment verification failed');
+      }
+
+      await fetchSubscriptionStatus(setSubscription, setLoading, setError);
+      alert(`Demo payment successful! Your account has been upgraded to ${tier.toUpperCase()}.`);
+    } catch (err) {
+      setError(err.response?.data?.error || err.message || 'Demo payment failed');
+    } finally {
+      setProcessing(false);
+      setProcessingTier(null);
     }
   };
 
@@ -352,7 +417,7 @@ export default function SubscriptionPage() {
                 ))}
               </ul>
 
-              <div>
+              <div className="space-y-2">
                 <button
                   onClick={() => handleRazorpayCheckout(plan.id)}
                   disabled={plan.disabled || processing}
@@ -368,6 +433,15 @@ export default function SubscriptionPage() {
                     ? 'Processing...'
                     : plan.cta}
                 </button>
+                {!plan.disabled && plan.price > 0 && (
+                  <button
+                    onClick={() => handleDemoUpgrade(plan.id)}
+                    disabled={processing}
+                    className="w-full rounded-lg border border-dashed border-gray-300 py-2 px-3 text-xs font-medium text-gray-600 hover:border-blue-500 hover:text-blue-600"
+                  >
+                    ⚡ Test Upgrade (Demo Mode)
+                  </button>
+                )}
               </div>
             </div>
           ))}

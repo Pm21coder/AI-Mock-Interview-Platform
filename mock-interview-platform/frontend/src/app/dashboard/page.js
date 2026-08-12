@@ -1,9 +1,32 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useSyncExternalStore } from 'react';
 import Navigation from '@/components/Navigation';
 import { getDashboardStats } from '@/utils/api';
 import { onSocketEvent, emitSocketEvent } from '@/utils/socket';
+
+function getDisplayName(email) {
+  const localPart = email?.split('@')[0] || '';
+  return localPart
+    .split(/[._-]+/)
+    .filter(Boolean)
+    .map((part) => `${part.charAt(0).toUpperCase()}${part.slice(1)}`)
+    .join(' ');
+}
+
+function getUsernameSnapshot() {
+  if (typeof window === 'undefined') return '';
+  return getDisplayName(window.localStorage.getItem('auth_email'));
+}
+
+function subscribeToAuthChanges(callback) {
+  window.addEventListener('storage', callback);
+  window.addEventListener('auth-change', callback);
+  return () => {
+    window.removeEventListener('storage', callback);
+    window.removeEventListener('auth-change', callback);
+  };
+}
 
 export default function DashboardPage() {
   const [stats, setStats] = useState({ interviews_completed: 0, average_score: 0, confidence_score: 0 });
@@ -12,20 +35,39 @@ export default function DashboardPage() {
   const [error, setError] = useState(null);
   const [lastUpdated, setLastUpdated] = useState(null);
   const [liveUpdate, setLiveUpdate] = useState(false);
+  const username = useSyncExternalStore(subscribeToAuthChanges, getUsernameSnapshot, () => '');
 
   const fetchDashboardData = useCallback(async () => {
     try {
       setLoading(true);
       const data = await getDashboardStats();
-      if (data.error) {
+      // Normalize multiple possible response shapes from API/axios
+      // server may return { stats: {...}, recent_interviews: [...] }
+      // or axios wrappers may nest under .data
+      const payload = data?.stats ? data : (data?.data ? data.data : data);
+
+      if (!payload) {
+        setError('Server returned an unexpected response');
+        return;
+      }
+
+      if (payload.error) {
         setError('Server error. Please try again later.');
         return;
       }
-      if (data.stats) {
-        setStats(data.stats);
-      }
-      if (Array.isArray(data.recent_interviews)) {
-        setRecentInterviews(data.recent_interviews);
+
+      const statsObj = payload.stats || payload;
+      // Defensive mapping: support both `interviews_completed` and `completed_interviews`
+      const normalizedStats = {
+        interviews_completed: statsObj.interviews_completed ?? statsObj.completed_interviews ?? 0,
+        average_score: statsObj.average_score ?? statsObj.avg_score ?? 0,
+        confidence_score: statsObj.confidence_score ?? statsObj.confidence ?? 0,
+      };
+      setStats(normalizedStats);
+
+      const recent = payload.recent_interviews || payload.recentInterviews || [];
+      if (Array.isArray(recent)) {
+        setRecentInterviews(recent);
       }
       setLastUpdated(new Date().toLocaleTimeString());
       setError(null);
@@ -45,7 +87,8 @@ export default function DashboardPage() {
       window.sessionStorage.removeItem('dashboard_refresh');
     }
 
-    // Defer the initial fetch to avoid synchronous setState within the effect.
+    // Defer the initial (always fresh) fetch to avoid synchronous setState
+    // within the effect. This also handles a completed-interview refresh.
     const initialFetch = setTimeout(fetchDashboardData, 0);
     const interval = setInterval(fetchDashboardData, 30000); // Refresh every 30 seconds
 
@@ -53,14 +96,22 @@ export default function DashboardPage() {
     // When an interview completes, the backend emits `dashboard_update`
     // with the fresh stats, so we update the UI immediately.
     const handleDashboardUpdate = (data) => {
+      console.debug('Received dashboard_update socket payload:', data);
       if (data && data.stats) {
         setStats({
           interviews_completed: data.stats.interviews_completed ?? 0,
           average_score: data.stats.average_score ?? 0,
           confidence_score: data.stats.confidence_score ?? 0,
         });
-        if (Array.isArray(data.stats.recent_interviews)) {
-          setRecentInterviews(data.stats.recent_interviews);
+        // Normalize recent interviews to a consistent array of objects
+        const incomingRecent = data.stats.recent_interviews || data.stats.recentInterviews || [];
+        if (Array.isArray(incomingRecent)) {
+          setRecentInterviews(incomingRecent.map((it) => ({
+            role: it.role || it.job_role || 'N/A',
+            score: typeof it.score === 'number' ? it.score : (it.score ? Number(it.score) : it.score),
+            date: it.date || it.created_at || new Date().toISOString(),
+            confidence: typeof it.confidence === 'number' ? it.confidence : (it.confidence ? Number(it.confidence) : it.confidence),
+          })));
         }
         setLastUpdated(new Date().toLocaleTimeString());
         setError(null);
@@ -88,11 +139,14 @@ export default function DashboardPage() {
         <Navigation />
         <main className="container mx-auto px-4 py-8">
           <h1 className="text-3xl font-bold text-gray-900 mb-8">Dashboard</h1>
-          <div className="flex items-center justify-center py-12">
-            <div className="flex items-center space-x-3 text-gray-600">
-              <div className="h-6 w-6 animate-spin rounded-full border-2 border-blue-600 border-t-transparent"></div>
-              <span>Loading dashboard data...</span>
-            </div>
+          {/* Skeleton loader for perceived performance */}
+          <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+            <div className="h-36 animate-pulse rounded-xl bg-white p-6 shadow" />
+            <div className="h-36 animate-pulse rounded-xl bg-white p-6 shadow" />
+            <div className="h-36 animate-pulse rounded-xl bg-white p-6 shadow" />
+          </div>
+          <div className="mt-8 rounded-xl bg-white p-6 shadow-lg">
+            <div className="h-64 animate-pulse rounded" />
           </div>
         </main>
       </div>
@@ -123,7 +177,10 @@ export default function DashboardPage() {
       <main className="container mx-auto px-4 py-8">
         {/* Header */}
         <div className="mb-8 flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
-          <h1 className="text-3xl font-bold text-gray-900">Dashboard</h1>
+          <div>
+            <h1 className="text-3xl font-bold text-gray-900">Dashboard</h1>
+            {username && <p className="mt-1 text-sm text-gray-600">Welcome back, {username}! 👋</p>}
+          </div>
           <div className="flex items-center gap-4">
             {liveUpdate && (
               <span className="animate-pulse rounded-full bg-green-100 px-3 py-1 text-xs font-medium text-green-800">

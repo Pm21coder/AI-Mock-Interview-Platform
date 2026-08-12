@@ -272,10 +272,11 @@ def get_dashboard_stats():
 
     try:
         # Read pre-aggregated stats from the dashboard_stats collection.
-        # If no record exists yet (e.g. first visit), fall back to a
-        # one-time rebuild from raw interview documents.
+        # Older records did not include history_synced_at and can be left at
+        # zero even when completed interview documents exist. Rebuild each
+        # legacy record once to backfill its history.
         stats = dashboard_service.get_stats(user_id)
-        if stats is None:
+        if stats is None or stats.history_synced_at is None:
             stats = dashboard_service.rebuild_from_interviews(user_id)
 
         response = jsonify({
@@ -293,21 +294,4 @@ def get_dashboard_stats():
 
     except Exception as exc:
         print(f"Dashboard stats error: {str(exc)}")
-        # Fallback to mock data in case of any error
-        response = jsonify({
-            'stats': {
-                'interviews_completed': 18,
-                'average_score': 82,
-                'confidence_score': 88
-            },
-            'recent_interviews': [
-                {'role': 'Software Engineer', 'score': 88, 'date': '2026-08-01', 'confidence': 90},
-                {'role': 'Product Manager', 'score': 79, 'date': '2026-07-29', 'confidence': 85},
-                {'role': 'Data Analyst', 'score': 91, 'date': '2026-07-24', 'confidence': 92},
-                {'role': 'UX Designer', 'score': 75, 'date': '2026-07-20', 'confidence': 80},
-                {'role': 'DevOps Engineer', 'score': 85, 'date': '2026-07-15', 'confidence': 88},
-            ]
-        })
-        response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
-        response.headers['Pragma'] = 'no-cache'
-        return response
+        return jsonify({'error': 'Unable to load dashboard data'}), 500

@@ -1,7 +1,7 @@
 import axios from 'axios';
 
 const api = axios.create({
-  baseURL: '', // Use relative path for Next.js proxy
+  baseURL: process.env.NEXT_PUBLIC_API_URL || '',
   headers: {
     'Content-Type': 'application/json',
   },
@@ -95,8 +95,22 @@ export const getResumeAnalysis = async (resumeId) => {
 };
 
 export const getResumeHistory = async () => {
-  const response = await api.get('/api/resume/history');
-  return response.data;
+  try {
+    const response = await api.get('/api/resume/history');
+    return response.data;
+  } catch (error) {
+    if (error.response) {
+      console.error('Resume history API error:', {
+        status: error.response.status,
+        data: error.response.data,
+      });
+    } else if (error.request) {
+      console.error('No response received for resume history request:', error.request);
+    } else {
+      console.error('Resume history request setup failed:', error.message);
+    }
+    throw error;
+  }
 };
 
 // Subscription API functions
@@ -106,8 +120,26 @@ export const getSubscriptionStatus = async () => {
 };
 
 export const createRazorpayOrder = async (data) => {
-  const response = await api.post('/api/subscription/create-order', data);
-  return response.data;
+  try {
+    const response = await api.post('/api/subscription/create-order', data);
+    return response.data;
+  } catch (error) {
+    try {
+      console.error('createRazorpayOrder full error:', error);
+    } catch (logErr) {
+      // Swallow logging errors
+    }
+
+    const status = error?.response?.status;
+    const respData = error?.response?.data;
+
+    console.error('createRazorpayOrder API error summary:', { status, data: respData });
+
+    const serverMsg = respData?.error || respData?.message || error?.message || 'Unknown error creating Razorpay order';
+    const out = new Error(serverMsg);
+    out.status = status;
+    throw out;
+  }
 };
 
 export const verifyRazorpayPayment = async (data) => {

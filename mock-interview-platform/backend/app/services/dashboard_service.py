@@ -1,6 +1,7 @@
 from datetime import datetime
 
 from app import mongo
+from flask import current_app
 from app.models.dashboard import DashboardStats
 
 
@@ -15,6 +16,14 @@ class DashboardService:
 
     COLLECTION = 'dashboard_stats'
     PROCESSED_SESSIONS = 'dashboard_processed_sessions'
+    # Simple per-process TTL cache to reduce repeated DB reads during
+    # high-frequency polling from the frontend. Keys are user_id strings.
+    _cache = {}
+    _cache_ttl_seconds = 5
+    # When the optional MongoDB service is offline, authenticated local users
+    # still need to see the interviews they just completed. Keep the
+    # idempotency guard in-process alongside the fallback stats cache.
+    _in_memory_processed_sessions = set()
 
     # ------------------------------------------------------------------
     # Read operations
@@ -23,11 +32,35 @@ class DashboardService:
     def get_stats(self, user_id):
         """Return the persisted dashboard stats for a user, or None."""
         try:
+            # Check short-lived cache first to avoid repeated expensive DB reads
+            cache_entry = self._cache.get(user_id)
+            if cache_entry:
+                cached_value, ts = cache_entry
+                # The cache is the source of truth in local fallback mode. Do
+                # not discard a completed interview merely because its entry
+                # is older than the normal database-backed cache TTL.
+                if not current_app.config.get('MONGO_AVAILABLE', True):
+                    return cached_value
+                if (datetime.utcnow() - ts).total_seconds() < self._cache_ttl_seconds:
+                    return cached_value
+
+            # If Mongo is known to be unavailable, avoid touching the client.
+            if not current_app.config.get('MONGO_AVAILABLE', True):
+                return None
+
             doc = mongo.db[self.COLLECTION].find_one({'user_id': user_id})
             if doc:
-                return DashboardStats.from_dict(doc)
+                stats = DashboardStats.from_dict(doc)
+                # Update cache
+                self._cache[user_id] = (stats, datetime.utcnow())
+                return stats
         except Exception as exc:
             print(f'DashboardService.get_stats error: {exc}')
+            try:
+                # Mark Mongo as unavailable to avoid repeated timeouts
+                current_app.config['MONGO_AVAILABLE'] = False
+            except Exception:
+                pass
         return None
 
     def get_or_create_stats(self, user_id):
@@ -36,6 +69,8 @@ class DashboardService:
         if stats is None:
             stats = DashboardStats(user_id=user_id)
             self.save_stats(stats)
+            # Ensure new stats are cached immediately
+            self._cache[user_id] = (stats, datetime.utcnow())
         return stats
 
     # ------------------------------------------------------------------
@@ -44,6 +79,9 @@ class DashboardService:
 
     def save_stats(self, stats):
         """Upsert the given DashboardStats document."""
+        if not current_app.config.get('MONGO_AVAILABLE', True):
+            return False
+
         try:
             doc = stats.to_dict()
             mongo.db[self.COLLECTION].update_one(
@@ -66,19 +104,28 @@ class DashboardService:
         """
         session_id = interview.get('_id')
         if session_id:
+            session_key = (user_id, str(session_id))
+            if session_key in self._in_memory_processed_sessions:
+                return self.get_stats(user_id) or self.get_or_create_stats(user_id)
+
             # Guard against double-counting when get_feedback is called
-            # multiple times for the same session (e.g. page refresh).
-            try:
-                already_processed = mongo.db[self.PROCESSED_SESSIONS].find_one(
-                    {'session_id': session_id, 'user_id': user_id}
-                )
-                if already_processed:
-                    return self.get_stats(user_id) or self.get_or_create_stats(user_id)
-                mongo.db[self.PROCESSED_SESSIONS].insert_one(
-                    {'session_id': session_id, 'user_id': user_id, 'processed_at': datetime.utcnow()}
-                )
-            except Exception as exc:
-                print(f'DashboardService.update_after_interview guard error: {exc}')
+            # multiple times for the same session (e.g. page refresh). In
+            # fallback mode the in-memory set above provides that guard
+            # without attempting a database connection.
+            if current_app.config.get('MONGO_AVAILABLE', True):
+                try:
+                    already_processed = mongo.db[self.PROCESSED_SESSIONS].find_one(
+                        {'session_id': session_id, 'user_id': user_id}
+                    )
+                    if already_processed:
+                        self._in_memory_processed_sessions.add(session_key)
+                        return self.get_stats(user_id) or self.get_or_create_stats(user_id)
+                    mongo.db[self.PROCESSED_SESSIONS].insert_one(
+                        {'session_id': session_id, 'user_id': user_id, 'processed_at': datetime.utcnow()}
+                    )
+                except Exception as exc:
+                    print(f'DashboardService.update_after_interview guard error: {exc}')
+            self._in_memory_processed_sessions.add(session_key)
 
         stats = self.get_or_create_stats(user_id)
 
@@ -121,7 +168,13 @@ class DashboardService:
         stats.recent_interviews = stats.recent_interviews[:10]  # Keep latest 10
 
         stats.updated_at = datetime.utcnow()
+        stats.history_synced_at = stats.updated_at
         self.save_stats(stats)
+        # Refresh short-lived cache so immediate reads return the updated stats
+        try:
+            self._cache[user_id] = (stats, datetime.utcnow())
+        except Exception:
+            pass
         return stats
 
     def rebuild_from_interviews(self, user_id):
@@ -131,14 +184,20 @@ class DashboardService:
         migrations or manual edits.
         """
         try:
+            # Only project the fields we need to compute stats to reduce IO
             interviews = list(
                 mongo.db.interviews.find(
-                    {'user_id': user_id, 'responses': {'$exists': True, '$ne': []}}
+                    {'user_id': user_id, 'responses': {'$exists': True, '$ne': []}},
+                    {'responses': 1, 'job_role': 1, 'created_at': 1}
                 )
             )
         except Exception as exc:
             print(f'DashboardService.rebuild_from_interviews error: {exc}')
             interviews = []
+            try:
+                current_app.config['MONGO_AVAILABLE'] = False
+            except Exception:
+                pass
 
         stats = DashboardStats(user_id=user_id)
         all_scores = []
@@ -178,6 +237,11 @@ class DashboardService:
         recent.sort(key=lambda x: x['date'], reverse=True)
         stats.recent_interviews = recent[:10]
         stats.updated_at = datetime.utcnow()
+        # Mark the record as backfilled so a dashboard with no completed
+        # interviews does not query the interview collection on every poll.
+        stats.history_synced_at = stats.updated_at
 
         self.save_stats(stats)
+        # Cache rebuilt stats
+        self._cache[user_id] = (stats, datetime.utcnow())
         return stats

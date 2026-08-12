@@ -18,6 +18,7 @@ class DashboardStats:
         total_responses=0,
         recent_interviews=None,
         updated_at=None,
+        history_synced_at=None,
     ):
         self.user_id = user_id
         self.interviews_completed = interviews_completed
@@ -26,6 +27,7 @@ class DashboardStats:
         self.total_responses = total_responses
         self.recent_interviews = recent_interviews or []
         self.updated_at = updated_at or datetime.utcnow()
+        self.history_synced_at = history_synced_at
 
     def to_dict(self):
         return {
@@ -36,6 +38,7 @@ class DashboardStats:
             'total_responses': self.total_responses,
             'recent_interviews': self.recent_interviews,
             'updated_at': self.updated_at,
+            'history_synced_at': self.history_synced_at,
         }
 
     @classmethod
@@ -48,4 +51,5 @@ class DashboardStats:
             total_responses=data.get('total_responses', 0),
             recent_interviews=data.get('recent_interviews', []),
             updated_at=data.get('updated_at'),
+            history_synced_at=data.get('history_synced_at'),
         )

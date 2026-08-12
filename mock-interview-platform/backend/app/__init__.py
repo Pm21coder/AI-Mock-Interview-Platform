@@ -15,16 +15,22 @@ def create_app(config_class=Config):
 
     CORS(app)
     # A remote MongoDB SRV record can be temporarily unavailable during local
-    # development (for example when DNS is offline).  The interview endpoints
+    # development (for example when DNS is offline). The interview endpoints
     # support guest sessions in memory, so do not let that optional dependency
     # prevent Flask from starting and cause the frontend proxy connection to
     # be reset.
     try:
         mongo.init_app(app)
-        app.config['MONGO_AVAILABLE'] = True
+        try:
+            with app.app_context():
+                mongo.cx.admin.command('ping')
+            app.config['MONGO_AVAILABLE'] = True
+        except Exception as exc:
+            app.config['MONGO_AVAILABLE'] = False
+            app.logger.warning('MongoDB is unavailable after init; starting in guest mode: %s', exc)
     except Exception as exc:
         app.config['MONGO_AVAILABLE'] = False
-        app.logger.warning('MongoDB is unavailable; starting in guest mode: %s', exc)
+        app.logger.warning('MongoDB init failed; starting in guest mode: %s', exc)
     socketio.init_app(app)
 
     from app.routes.interview import interview_bp
@@ -45,6 +51,17 @@ def create_app(config_class=Config):
 
     @app.route('/health')
     def health():
-        return {'status': 'ok'}, 200
+        # Report which Gemini client is active for diagnostics
+        from app.services.gemini_service import GeminiService
+        active = 'none'
+        try:
+            svc = GeminiService()
+            if getattr(svc, 'use_genai', False):
+                active = 'google.genai'
+            elif getattr(svc, 'model', None) is not None:
+                active = 'google.generativeai'
+        except Exception:
+            active = 'error'
+        return {'status': 'ok', 'active_client': active}, 200
 
     return app

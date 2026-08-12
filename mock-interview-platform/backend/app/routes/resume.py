@@ -141,12 +141,16 @@ def get_resume_analysis(resume_id):
         
         if not resume:
             return jsonify({'error': 'Resume not found'}), 404
-        
+
+        uploaded_at = resume.get('uploaded_at')
+        if not isinstance(uploaded_at, str) and hasattr(uploaded_at, 'isoformat'):
+            uploaded_at = uploaded_at.isoformat()
+
         return jsonify({
-            'resume_id': resume['_id'],
+            'resume_id': str(resume['_id']),
             'filename': resume['filename'],
             'analysis': resume['analysis'],
-            'uploaded_at': resume['uploaded_at'].isoformat()
+            'uploaded_at': uploaded_at
         })
     
     except Exception as exc:
@@ -175,13 +179,20 @@ def get_resume_history():
         resumes.sort(key=lambda resume: resume['uploaded_at'], reverse=True)
         resumes = resumes[:10]
 
+    def _format_uploaded_at(uploaded_at):
+        if isinstance(uploaded_at, str):
+            return uploaded_at
+        if hasattr(uploaded_at, 'isoformat'):
+            return uploaded_at.isoformat()
+        return None
+
     return jsonify({
         'resumes': [
             {
-                'id': resume['_id'],
+                'id': str(resume['_id']),
                 'filename': resume['filename'],
                 'overall_score': resume.get('analysis', {}).get('overall_score', 0),
-                'uploaded_at': resume['uploaded_at'].isoformat(),
+                'uploaded_at': _format_uploaded_at(resume.get('uploaded_at')),
             }
             for resume in resumes
         ]

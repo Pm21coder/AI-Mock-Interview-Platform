@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import toast from 'react-hot-toast';
 import Navigation from '@/components/Navigation';
@@ -12,6 +12,17 @@ export default function AuthPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const token = window.localStorage.getItem('auth_token');
+      if (token) {
+        const params = new URLSearchParams(window.location.search);
+        const nextPath = params.get('next');
+        router.push(nextPath?.startsWith('/') ? nextPath : '/interview/setup');
+      }
+    }
+  }, [router]);
 
   const submit = async (event) => {
     event.preventDefault();
@@ -48,25 +59,31 @@ export default function AuthPage() {
               </p>
             </div>
 
-            <form onSubmit={submit} className="space-y-5">
+            <form onSubmit={submit} className="space-y-5" action="#" method="post">
               <div>
-                <label className="mb-1 block text-sm font-medium text-gray-700">Email address</label>
+                <label htmlFor="email" className="mb-1 block text-sm font-medium text-gray-700">Email address</label>
                 <input
+                  id="email"
+                  name="email"
                   type="email"
                   value={email}
                   onChange={(event) => setEmail(event.target.value)}
                   placeholder="you@example.com"
+                  autoComplete="email"
                   required
                   className="input-field"
                 />
               </div>
               <div>
-                <label className="mb-1 block text-sm font-medium text-gray-700">Password</label>
+                <label htmlFor="password" className="mb-1 block text-sm font-medium text-gray-700">Password</label>
                 <input
+                  id="password"
+                  name="password"
                   type="password"
                   value={password}
                   onChange={(event) => setPassword(event.target.value)}
                   placeholder="At least 8 characters"
+                  autoComplete="current-password"
                   minLength="8"
                   required
                   className="input-field"

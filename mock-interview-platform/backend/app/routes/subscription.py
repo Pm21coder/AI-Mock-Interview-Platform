@@ -44,8 +44,8 @@ def _razorpay_order_error_response(exc):
     error_message = str(exc).lower()
     if any(term in error_message for term in ('auth', 'credential', 'key')):
         return jsonify({
-            'error': 'Razorpay authentication failed. Check your key id and key secret.'
-        }), 401
+            'error': 'Razorpay authentication failed. Please check your RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET in backend/.env.'
+        }), 400
     if isinstance(exc, (GatewayError, ServerError)):
         return jsonify({
             'error': 'Razorpay is temporarily unavailable. Please try again in a moment.'
@@ -198,36 +198,48 @@ def create_razorpay_order():
     if not amount or amount < 100:
         return jsonify({'error': 'Order amount must be at least 100 paise'}), 400
 
-    if not Config.RAZORPAY_KEY_ID or not Config.RAZORPAY_KEY_SECRET:
-        return jsonify({
-            'error': 'Razorpay is not configured yet. Add Razorpay key id and secret to enable payments.'
-        }), 501
+    is_demo_mode = data.get('demo_mode') is True
 
-    receipt = 'sub_{}_{}_{}'.format(
-        tier[:1],
-        hashlib.sha1(str(current_user['_id']).encode('utf-8')).hexdigest()[:8],
-        int(datetime.utcnow().timestamp())
-    )
+    if not is_demo_mode:
+        if not Config.RAZORPAY_KEY_ID or not Config.RAZORPAY_KEY_SECRET:
+            return jsonify({
+                'error': 'Razorpay is not configured yet. Add Razorpay key id and secret to enable payments, or use Demo mode.'
+            }), 400
 
-    try:
-        order = razorpay_client.order.create(data={
+        receipt = 'sub_{}_{}_{}'.format(
+            tier[:1],
+            hashlib.sha1(str(current_user['_id']).encode('utf-8')).hexdigest()[:8],
+            int(datetime.utcnow().timestamp())
+        )
+
+        try:
+            order = razorpay_client.order.create(data={
+                'amount': amount,
+                'currency': Config.RAZORPAY_CURRENCY,
+                'receipt': receipt,
+                'payment_capture': 1,
+                'notes': {
+                    'subscription_tier': tier,
+                    'user_id': str(current_user['_id']),
+                    'email': current_user.get('email', ''),
+                },
+            })
+        except (BadRequestError, GatewayError, ServerError) as exc:
+            return _razorpay_order_error_response(exc)
+        except Exception:
+            current_app.logger.exception('Unexpected Razorpay order creation failure')
+            return jsonify({
+                'error': 'Unable to contact Razorpay. Please try again in a moment or use Demo mode.'
+            }), 502
+    else:
+        # Create a simulated demo order for local testing
+        demo_id = 'order_demo_{}_{}'.format(tier, int(datetime.utcnow().timestamp()))
+        order = {
+            'id': demo_id,
             'amount': amount,
             'currency': Config.RAZORPAY_CURRENCY,
-            'receipt': receipt,
-            'payment_capture': 1,
-            'notes': {
-                'subscription_tier': tier,
-                'user_id': str(current_user['_id']),
-                'email': current_user.get('email', ''),
-            },
-        })
-    except (BadRequestError, GatewayError, ServerError) as exc:
-        return _razorpay_order_error_response(exc)
-    except Exception:
-        current_app.logger.exception('Unexpected Razorpay order creation failure')
-        return jsonify({
-            'error': 'Unable to contact Razorpay. Please try again in a moment.'
-        }), 502
+            'is_demo': True,
+        }
 
     # Persist the order -> tier mapping so the correct plan is activated after
     # signature verification, without trusting any client-supplied value.
@@ -239,6 +251,7 @@ def create_razorpay_order():
         'amount': order['amount'],
         'currency': order['currency'],
         'status': 'created',
+        'is_demo': order.get('is_demo', False),
         'created_at': datetime.utcnow(),
     }
     fallback_razorpay_orders[order['id']] = order_record.copy()
@@ -254,35 +267,26 @@ def create_razorpay_order():
         'order_id': order['id'],
         'amount': order['amount'],
         'currency': order['currency'],
-        'key_id': Config.RAZORPAY_KEY_ID,
+        'key_id': Config.RAZORPAY_KEY_ID or 'rzp_demo_key',
+        'is_demo': order.get('is_demo', False),
     }), 200
 
 
 @subscription_bp.route('/verify-payment', methods=['POST'])
 @token_required
 def verify_razorpay_payment():
-    """Verify the Razorpay payment signature and activate the subscription.
-
-    Signature algorithm (per Razorpay docs):
-        HMAC-SHA256(<razorpay_order_id>|<razorpay_payment_id>, KEY_SECRET)
-    The generated digest must equal the ``razorpay_signature`` returned by
-    Razorpay. On mismatch the payment is rejected and the subscription is **not**
-    marked as paid.
-    """
+    """Verify the Razorpay payment signature and activate the subscription."""
     current_user = _get_current_user()
     data = request.get_json(silent=True) or {}
     razorpay_order_id = data.get('razorpay_order_id')
-    razorpay_payment_id = data.get('razorpay_payment_id')
-    razorpay_signature = data.get('razorpay_signature')
+    razorpay_payment_id = data.get('razorpay_payment_id') or 'pay_demo_123'
+    razorpay_signature = data.get('razorpay_signature') or 'demo_signature'
 
-    if not all([razorpay_order_id, razorpay_payment_id, razorpay_signature]):
-        return jsonify({'error': 'Missing required payment fields'}), 400
+    if not razorpay_order_id:
+        return jsonify({'error': 'Missing required payment order ID'}), 400
 
     if not _is_real_user(current_user):
         return jsonify({'error': 'Please sign in with an account before making a payment'}), 401
-
-    if not Config.RAZORPAY_KEY_SECRET:
-        return jsonify({'error': 'Razorpay is not configured'}), 500
 
     try:
         order_record = mongo.db.razorpay_orders.find_one({'order_id': razorpay_order_id})
@@ -304,17 +308,23 @@ def verify_razorpay_payment():
     if tier not in ['basic', 'pro'] or not server_order_id:
         return jsonify({'error': 'Payment order has an invalid plan'}), 400
 
-    # --- Signature verification (HMAC-SHA256) ---
-    msg = '{}|{}'.format(server_order_id, razorpay_payment_id)
-    expected_signature = hmac.new(
-        Config.RAZORPAY_KEY_SECRET.encode('utf-8'),
-        msg.encode('utf-8'),
-        hashlib.sha256,
-    ).hexdigest()
+    # --- Signature verification (HMAC-SHA256 or Demo mode) ---
+    is_demo_order = order_record.get('is_demo') or server_order_id.startswith('order_demo_')
+    if not is_demo_order:
+        if not Config.RAZORPAY_KEY_SECRET:
+            return jsonify({'error': 'Razorpay is not configured'}), 500
 
-    if not hmac.compare_digest(expected_signature, razorpay_signature):
-        # Signature mismatch: do NOT mark the subscription as paid.
-        return jsonify({'error': 'Signature verification failed'}), 400
+        msg = '{}|{}'.format(server_order_id, razorpay_payment_id)
+        expected_signature = hmac.new(
+            Config.RAZORPAY_KEY_SECRET.encode('utf-8'),
+            msg.encode('utf-8'),
+            hashlib.sha256,
+        ).hexdigest()
+
+        if not hmac.compare_digest(expected_signature, razorpay_signature):
+            # Signature mismatch: do NOT mark the subscription as paid.
+            return jsonify({'error': 'Signature verification failed'}), 400
+
 
     # --- Activate subscription ---
     if tier in ['basic', 'pro']:

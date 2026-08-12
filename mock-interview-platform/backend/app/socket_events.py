@@ -62,6 +62,11 @@ def emit_dashboard_update(user_id, stats):
         user_id: The string user id.
         stats: A dict with the updated dashboard stats payload.
     """
+    try:
+        # Log the outgoing dashboard payload for debugging
+        print(f'Emitting dashboard_update to user {user_id}: {{"interviews_completed": {getattr(stats, "interviews_completed", stats.get("interviews_completed", None))}}}')
+    except Exception:
+        pass
     socketio.emit(
         'dashboard_update',
         {'stats': stats},

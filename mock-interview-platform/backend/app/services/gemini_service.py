@@ -1,21 +1,164 @@
 import json
+import time
 
 try:
     import google.generativeai as genai
 except ImportError:
     genai = None
+try:
+    import google.genai as genai_new
+except ImportError:
+    genai_new = None
 
 from app.config import Config
 
 
 class GeminiService:
+    DEFAULT_MODELS = (
+        'gemini-2.5-flash',
+        'gemini-2.0-flash',
+        'gemini-1.5-flash',
+        'gemini-1.5-pro',
+    )
+
+    @staticmethod
+    def normalize_model_name(model_name):
+        """Normalize a Gemini model identifier across both SDK variants."""
+        name = (model_name or '').strip().replace('\\', '/')
+        if not name:
+            return 'gemini-2.0-flash'
+        if name.startswith('models/'):
+            name = name[len('models/'):]
+        if name.startswith('model/'):
+            name = name[len('model/'):]
+        return name or 'gemini-2.0-flash'
+
+    @classmethod
+    def model_candidates(cls, configured_model=None):
+        seen = set()
+        ordered = []
+        for candidate in [configured_model, *cls.DEFAULT_MODELS]:
+            model_name = cls.normalize_model_name(candidate)
+            if model_name and model_name not in seen:
+                seen.add(model_name)
+                ordered.append(model_name)
+        return ordered
+
     def __init__(self):
         api_key = Config.GOOGLE_GEMINI_API_KEY
-        if genai and Config.ENABLE_GEMINI and api_key and api_key != 'demo-key':
-            genai.configure(api_key=api_key)
-            self.model = genai.GenerativeModel(Config.GOOGLE_GEMINI_MODEL)
-        else:
+        self.model_name = self.normalize_model_name(Config.GOOGLE_GEMINI_MODEL)
+        self.model_candidates_list = self.model_candidates(self.model_name)
+        self.use_genai = False
+        self.genai_client = None
+        self.model = None
+        self.last_error = None
+
+        if genai_new and Config.ENABLE_GEMINI and api_key and api_key != 'demo-key':
+            try:
+                self.genai_client = genai_new.Client(api_key=api_key)
+                self.use_genai = True
+                print('GeminiService: configured google.genai client')
+            except Exception as exc:
+                print('GeminiService: failed to configure google.genai client:', exc)
+                self.genai_client = None
+                self.use_genai = False
+
+        if not self.use_genai and genai and Config.ENABLE_GEMINI and api_key and api_key != 'demo-key':
+            try:
+                genai.configure(api_key=api_key)
+                self.model = genai.GenerativeModel(self.model_name)
+                print('GeminiService: configured model', self.model_name)
+            except Exception as exc:
+                print('GeminiService: failed to configure model:', exc)
+                self.model = None
+        if not self.use_genai and not self.model:
             self.model = None
+
+    @property
+    def is_available(self):
+        """Whether either supported Gemini client is ready for a request."""
+        return bool(self.genai_client) if self.use_genai else bool(self.model)
+
+    def _generate_json(self, prompt, max_output_tokens):
+        """Request structured JSON using the active Gemini SDK."""
+        last_error = None
+        for model_name in self.model_candidates_list:
+            try:
+                if self.use_genai and self.genai_client:
+                    response = self.genai_client.models.generate_content(
+                        model=model_name,
+                        contents=prompt,
+                        config=genai_new.types.GenerateContentConfig(
+                            response_mime_type='application/json',
+                            max_output_tokens=max_output_tokens,
+                            temperature=0.2,
+                        ),
+                    )
+                else:
+                    if not self.model:
+                        self.model = genai.GenerativeModel(model_name)
+                    response = self.model.generate_content(
+                        prompt,
+                        generation_config=genai.GenerationConfig(
+                            response_mime_type='application/json',
+                            max_output_tokens=max_output_tokens,
+                            temperature=0.2,
+                        ),
+                        request_options={'timeout': Config.GEMINI_TIMEOUT_SECONDS},
+                    )
+                text = self._extract_response_text(response)
+                if text:
+                    self.model_name = model_name
+                    return text
+                last_error = ValueError('Gemini returned an empty response')
+            except Exception as exc:  # pragma: no cover - runtime SDK variance
+                print(f'GeminiService._generate_json: model {model_name} failed: {exc}')
+                last_error = exc
+                continue
+
+        self.last_error = last_error
+        raise last_error or RuntimeError('Gemini request failed for all configured models')
+
+    @staticmethod
+    def _extract_response_text(response):
+        """Read text from current and legacy Gemini response objects."""
+        if response is None:
+            return ''
+
+        text = getattr(response, 'text', '') or ''
+        if text:
+            return str(text)
+
+        candidates = getattr(response, 'candidates', None) or []
+        if candidates:
+            candidate = candidates[0]
+            content = getattr(candidate, 'content', None)
+            parts = getattr(content, 'parts', None) or []
+            for part in parts:
+                if hasattr(part, 'text') and getattr(part, 'text', None):
+                    return str(part.text)
+            text = ''.join(getattr(part, 'text', '') or '' for part in parts)
+            if text:
+                return text
+
+        if hasattr(response, 'output') and response.output:
+            output = getattr(response, 'output')
+            if isinstance(output, dict):
+                text = output.get('text') or output.get('content') or ''
+                if text:
+                    return str(text)
+
+        if hasattr(response, 'to_dict'):
+            try:
+                data = response.to_dict()
+                if isinstance(data, dict):
+                    text = data.get('text') or data.get('content') or ''
+                    if text:
+                        return str(text)
+            except Exception:
+                pass
+
+        return ''
 
     def generate_questions(self, job_role, category, difficulty, num_questions=5):
         prompt = f"""
@@ -31,23 +174,25 @@ class GeminiService:
         ]
         """
 
-        if not self.model:
+        if not self.is_available:
+            print('GeminiService.generate_questions: Gemini unavailable, using fallback')
             return self.get_fallback_questions(job_role, category, num_questions)
 
+        start = time.time()
         try:
-            response = self.model.generate_content(
-                prompt,
-                request_options={'timeout': Config.GEMINI_TIMEOUT_SECONDS},
-            )
-            text = getattr(response, 'text', '')
+            text = self._generate_json(prompt, max_output_tokens=1024)
+            elapsed = time.time() - start
+            print(f'GeminiService.generate_questions: got response in {elapsed:.2f}s; text_len={len(text)}')
             if not text:
+                print('GeminiService.generate_questions: empty text, using fallback')
                 return self.get_fallback_questions(job_role, category, num_questions)
             questions = self._parse_json_response(text)
             if not isinstance(questions, list):
                 raise ValueError('Gemini returned questions in an invalid format')
             return questions
         except Exception as exc:
-            print(f'Error generating questions: {exc}')
+            elapsed = time.time() - start
+            print(f'Error generating questions ({elapsed:.2f}s): {exc}')
             return self.get_fallback_questions(job_role, category, num_questions)
 
     def analyze_answer(self, question, user_answer, expected_answer):
@@ -76,23 +221,25 @@ class GeminiService:
         }}
         """
 
-        if not self.model:
+        if not self.is_available:
+            print('GeminiService.analyze_answer: Gemini unavailable, using fallback')
             return self.get_fallback_feedback()
 
+        start = time.time()
         try:
-            response = self.model.generate_content(
-                prompt,
-                request_options={'timeout': Config.GEMINI_TIMEOUT_SECONDS},
-            )
-            text = getattr(response, 'text', '')
+            text = self._generate_json(prompt, max_output_tokens=1024)
+            elapsed = time.time() - start
+            print(f'GeminiService.analyze_answer: got response in {elapsed:.2f}s; text_len={len(text)}')
             if not text:
+                print('GeminiService.analyze_answer: empty text, using fallback')
                 return self.get_fallback_feedback()
             feedback = self._parse_json_response(text)
             if not isinstance(feedback, dict):
                 raise ValueError('Gemini returned feedback in an invalid format')
             return feedback
         except Exception as exc:
-            print(f'Error analyzing answer: {exc}')
+            elapsed = time.time() - start
+            print(f'Error analyzing answer ({elapsed:.2f}s): {exc}')
             return self.get_fallback_feedback()
 
     def get_fallback_questions(self, job_role, category, num_questions=5):
@@ -266,23 +413,25 @@ class GeminiService:
         Provide constructive, actionable feedback that will help improve the resume.
         """
 
-        if not self.model:
+        if not self.is_available:
+            print('GeminiService.analyze_resume: Gemini unavailable, using fallback')
             return self.get_fallback_resume_analysis()
 
+        start = time.time()
         try:
-            response = self.model.generate_content(
-                prompt,
-                request_options={'timeout': Config.GEMINI_TIMEOUT_SECONDS},
-            )
-            text = getattr(response, 'text', '')
+            text = self._generate_json(prompt, max_output_tokens=2048)
+            elapsed = time.time() - start
+            print(f'GeminiService.analyze_resume: got response in {elapsed:.2f}s; text_len={len(text)}')
             if not text:
+                print('GeminiService.analyze_resume: empty text, using fallback')
                 return self.get_fallback_resume_analysis()
             analysis = self._parse_json_response(text)
             if not isinstance(analysis, dict):
                 raise ValueError('Gemini returned resume analysis in an invalid format')
             return analysis
         except Exception as exc:
-            print(f'Error analyzing resume: {exc}')
+            elapsed = time.time() - start
+            print(f'Error analyzing resume ({elapsed:.2f}s): {exc}')
             return self.get_fallback_resume_analysis()
 
     def get_fallback_resume_analysis(self):

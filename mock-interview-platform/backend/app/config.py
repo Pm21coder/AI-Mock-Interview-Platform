@@ -9,12 +9,23 @@ from dotenv import load_dotenv
 load_dotenv(Path(__file__).resolve().parent.parent / '.env')
 
 
-def _with_mongo_connect_timeout(uri, timeout_ms):
-    """Avoid blocking API startup for the default 20-second DNS timeout."""
-    if not uri.startswith('mongodb+srv://') or 'connectTimeoutMS=' in uri:
+def _with_mongo_timeouts(uri, timeout_ms):
+    """Avoid blocking API requests on long MongoDB server selection waits."""
+    existing_uri = uri.lower()
+    timeout_options = {
+        'connectTimeoutMS': timeout_ms,
+        'serverSelectionTimeoutMS': timeout_ms,
+        'socketTimeoutMS': timeout_ms,
+    }
+    missing_options = [
+        f'{key}={value}'
+        for key, value in timeout_options.items()
+        if f'{key.lower()}=' not in existing_uri
+    ]
+    if not missing_options:
         return uri
     separator = '&' if '?' in uri else '?'
-    return f'{uri}{separator}connectTimeoutMS={timeout_ms}'
+    return f'{uri}{separator}' + '&'.join(missing_options)
 
 
 class Config:
@@ -27,18 +38,20 @@ class Config:
     JWT_ACCESS_TOKEN_EXPIRES = timedelta(hours=24)
 
     # MongoDB Configuration
-    MONGO_CONNECT_TIMEOUT_MS = int(os.getenv('MONGO_CONNECT_TIMEOUT_MS', '3000'))
-    MONGO_URI = _with_mongo_connect_timeout(
+    MONGO_CONNECT_TIMEOUT_MS = int(os.getenv('MONGO_CONNECT_TIMEOUT_MS', '1500'))
+    MONGO_URI = _with_mongo_timeouts(
         os.getenv('MONGODB_URI', 'mongodb://localhost:27017/mock_interview'),
         MONGO_CONNECT_TIMEOUT_MS,
     )
 
     # Google Gemini AI Configuration
     GOOGLE_GEMINI_API_KEY = os.getenv('GOOGLE_GEMINI_API_KEY', '')
-    GOOGLE_GEMINI_MODEL = os.getenv('GOOGLE_GEMINI_MODEL', 'gemini-1.5-flash')
-    # The app has useful local fallbacks. Keep the external provider opt-in so
-    # an unavailable network service can never block an interview request.
-    ENABLE_GEMINI = os.getenv('ENABLE_GEMINI', 'false').lower() == 'true'
+    # Use a stable Gemini model name that is supported by both the legacy and
+    # modern Google SDKs. Strip any legacy `models/` prefix before use.
+    GOOGLE_GEMINI_MODEL = os.getenv('GOOGLE_GEMINI_MODEL', 'gemini-2.0-flash')
+    # Use Gemini whenever a valid API key is configured. The service retains
+    # local fallbacks for unavailable credentials or provider errors.
+    ENABLE_GEMINI = os.getenv('ENABLE_GEMINI', 'true').lower() == 'true'
     # Keep interactive endpoints responsive when the external AI provider is
     # slow or unreachable; the service supplies local fallback responses.
     GEMINI_TIMEOUT_SECONDS = float(os.getenv('GEMINI_TIMEOUT_SECONDS', '10'))
