@@ -8,9 +8,11 @@ from razorpay.errors import BadRequestError, GatewayError, ServerError
 
 from app import mongo
 from app.config import Config
+from app.services.subscription_service import SubscriptionService
 from app.utils.auth import token_required
 
 subscription_bp = Blueprint('subscription', __name__)
+subscription_service = SubscriptionService()
 
 fallback_razorpay_orders = {}
 fallback_subscriptions = {}
@@ -107,71 +109,9 @@ def get_subscription_status():
     current_user = _get_current_user()
     user_id = current_user['_id']
 
-    # Handle guest users (no account) - return free tier by default
-    if user_id == 'guest':
-        return jsonify(_subscription_status_payload('free')), 200
-
-    fallback_subscription = fallback_subscriptions.get(str(user_id))
-    if fallback_subscription:
-        end_date = fallback_subscription.get('subscription_end_date')
-        if end_date and datetime.utcnow() > end_date:
-            fallback_subscriptions.pop(str(user_id), None)
-        else:
-            return jsonify(_subscription_status_payload(
-                fallback_subscription.get('tier', 'free'),
-                fallback_subscription.get('status', 'active'),
-                fallback_subscription.get('interviews_used_this_month', 0),
-                fallback_subscription.get('subscription_start_date'),
-                fallback_subscription.get('subscription_end_date'),
-            )), 200
-
-    # Handle demo users (stored in memory, not MongoDB)
-    if str(user_id).startswith('demo_'):
-        return jsonify(_subscription_status_payload('free')), 200
-
-    try:
-        user_data = mongo.db.users.find_one({'_id': user_id})
-    except Exception:
-        user_data = None
-
-    if not user_data:
-        return jsonify(_subscription_status_payload('free')), 200
-
-    tier = user_data.get('subscription_tier', 'free')
-    plan_info = Config.SUBSCRIPTION_TIERS.get(tier, Config.SUBSCRIPTION_TIERS['free'])
-
-    # Calculate interviews remaining
-    interviews_used = user_data.get('interviews_used_this_month', 0)
-    monthly_limit = plan_info['monthly_interviews']
-    interviews_remaining = max(0, monthly_limit - interviews_used) if monthly_limit != float('inf') else float('inf')
-
-    # Check if subscription needs reset (new month)
-    subscription_end = user_data.get('subscription_end_date')
-    if subscription_end and datetime.utcnow() > subscription_end:
-        # Reset monthly usage
-        mongo.db.users.update_one(
-            {'_id': user_id},
-            {
-                '$set': {
-                    'interviews_used_this_month': 0,
-                    'subscription_start_date': datetime.utcnow(),
-                    'subscription_end_date': datetime.utcnow() + timedelta(days=30)
-                }
-            }
-        )
-        interviews_used = 0
-        interviews_remaining = monthly_limit
-
-    return jsonify({
-        'tier': tier,
-        'status': user_data.get('subscription_status', 'active'),
-        'interviews_used_this_month': interviews_used,
-        'interviews_remaining': interviews_remaining,
-        'monthly_limit': monthly_limit if monthly_limit != float('inf') else 'unlimited',
-        'features': plan_info['features'],
-        'subscription_start_date': user_data.get('subscription_start_date'),
-        'subscription_end_date': user_data.get('subscription_end_date'),
-    }), 200
+    # Use the subscription service for consistent handling
+    subscription = subscription_service.get_user_subscription(user_id)
+    return jsonify(subscription), 200
 
 
 @subscription_bp.route('/create-order', methods=['POST'])
@@ -387,21 +327,139 @@ def cancel_subscription():
         return jsonify({'error': 'No active subscription found'}), 404
 
     try:
-        result = mongo.db.users.update_one(
-            {'_id': current_user['_id']},
-            {
-                '$set': {
-                    'subscription_tier': 'free',
-                    'subscription_status': 'canceled',
-                    'subscription_end_date': datetime.utcnow(),
-                    'razorpay_order_id': None,
-                }
-            }
-        )
-        if result.matched_count == 0:
-            return jsonify({'error': 'No active subscription found'}), 404
+        subscription_service.cancel_subscription(current_user['_id'])
         return jsonify({
             'message': 'Subscription canceled. You are now on the free plan.'
         }), 200
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+
+# ========================
+# Enhanced Subscription Routes
+# ========================
+
+@subscription_bp.route('/usage-stats', methods=['GET'])
+@token_required
+def get_usage_stats():
+    """Get detailed usage statistics for the current user"""
+    current_user = _get_current_user()
+    user_id = current_user['_id']
+
+    try:
+        stats = subscription_service.get_usage_stats(user_id)
+        return jsonify(stats), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@subscription_bp.route('/billing-history', methods=['GET'])
+@token_required
+def get_billing_history():
+    """Get billing history for the current user"""
+    current_user = _get_current_user()
+    user_id = current_user['_id']
+
+    try:
+        limit = request.args.get('limit', 50, type=int)
+        history = subscription_service.get_billing_history(user_id, limit=limit)
+        return jsonify({'billing_history': history}), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@subscription_bp.route('/upgrade', methods=['POST'])
+@token_required
+def upgrade_subscription():
+    """Upgrade to a higher tier subscription"""
+    current_user = _get_current_user()
+    user_id = current_user['_id']
+    data = request.get_json(silent=True) or {}
+    new_tier = (data.get('tier') or '').lower()
+
+    if not _is_real_user(current_user):
+        return jsonify({'error': 'Please sign in before upgrading'}), 401
+
+    if new_tier not in ['basic', 'pro']:
+        return jsonify({'error': 'Invalid subscription tier'}), 400
+
+    try:
+        subscription = subscription_service.upgrade_subscription(
+            user_id,
+            new_tier,
+            razorpay_order_id=data.get('razorpay_order_id'),
+            razorpay_payment_id=data.get('razorpay_payment_id')
+        )
+        return jsonify({
+            'message': f'Successfully upgraded to {new_tier} plan',
+            'subscription': subscription
+        }), 200
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@subscription_bp.route('/trial/start', methods=['POST'])
+@token_required
+def start_trial():
+    """Start a free trial for a user"""
+    current_user = _get_current_user()
+    user_id = current_user['_id']
+    data = request.get_json(silent=True) or {}
+    tier = (data.get('tier') or 'pro').lower()
+    trial_days = data.get('trial_days', 7)
+
+    if not _is_real_user(current_user):
+        return jsonify({'error': 'Please sign in to start a trial'}), 401
+
+    if tier not in ['basic', 'pro']:
+        return jsonify({'error': 'Invalid subscription tier for trial'}), 400
+
+    try:
+        # Check if user already has an active subscription
+        current_sub = subscription_service.get_user_subscription(user_id)
+        if current_sub['tier'] != 'free':
+            return jsonify({
+                'error': f'You already have an active {current_sub["tier"]} subscription'
+            }), 400
+
+        subscription = subscription_service.start_trial(user_id, tier, trial_days)
+        return jsonify({
+            'message': f'Trial for {tier} plan started',
+            'subscription': subscription
+        }), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@subscription_bp.route('/features', methods=['GET'])
+@token_required
+def get_available_features():
+    """Get list of features available to current user"""
+    current_user = _get_current_user()
+    user_id = current_user['_id']
+
+    try:
+        features = subscription_service.get_available_features(user_id)
+        return jsonify({'features': features}), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@subscription_bp.route('/has-feature/<feature_name>', methods=['GET'])
+@token_required
+def check_feature_access(feature_name):
+    """Check if user has access to a specific feature"""
+    current_user = _get_current_user()
+    user_id = current_user['_id']
+
+    try:
+        has_access = subscription_service.has_feature(user_id, feature_name)
+        return jsonify({
+            'feature': feature_name,
+            'has_access': has_access
+        }), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+

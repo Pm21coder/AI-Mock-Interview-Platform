@@ -3,8 +3,8 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import toast from 'react-hot-toast';
-import Navigation from '@/components/Navigation';
-import { login, register } from '@/utils/api';
+import Navigation from '../../components/Navigation';
+import { login, register } from '../../utils/api';
 
 export default function AuthPage() {
   const router = useRouter();

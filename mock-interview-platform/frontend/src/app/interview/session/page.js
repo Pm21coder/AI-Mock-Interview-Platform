@@ -3,11 +3,11 @@
 import { Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import toast from 'react-hot-toast';
-import Navigation from '@/components/Navigation';
-import QuestionDisplay from '@/components/QuestionDisplay';
-import VideoRecorder from '@/components/VideoRecorder';
-import FeedbackDisplay from '@/components/FeedbackDisplay';
-import { getQuestions, submitAnswer, getFeedback } from '@/utils/api';
+import Navigation from '../../../components/Navigation';
+import QuestionDisplay from '../../../components/QuestionDisplay';
+import VideoRecorder from '../../../components/VideoRecorder';
+import FeedbackDisplay from '../../../components/FeedbackDisplay';
+import { getQuestions, submitAnswer, getFeedback } from '../../../utils/api';
 
 function getSpeechErrorMessage(error) {
   const messages = {

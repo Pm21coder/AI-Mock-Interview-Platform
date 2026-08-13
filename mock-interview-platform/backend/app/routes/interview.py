@@ -9,6 +9,7 @@ from app.models.interview import InterviewQuestion, InterviewSession
 from app.services.dashboard_service import DashboardService
 from app.services.gemini_service import GeminiService
 from app.services.nlp_service import NLPService
+from app.services.subscription_service import SubscriptionService
 from app.socket_events import emit_dashboard_update
 from app.utils.auth import token_required
 
@@ -16,59 +17,11 @@ interview_bp = Blueprint('interview', __name__)
 gemini_service = GeminiService()
 nlp_service = NLPService()
 dashboard_service = DashboardService()
+subscription_service = SubscriptionService()
 
 # The app remains usable locally when MongoDB has not been started. Data in
 # this store lasts for the lifetime of the backend process.
 demo_sessions = {}
-
-
-def check_subscription_limit(user_id):
-    """Check if user has reached their monthly interview limit"""
-    if user_id == 'guest':
-        return True, None
-    
-    try:
-        user = mongo.db.users.find_one({'_id': user_id})
-        if not user:
-            return True, None
-        
-        tier = user.get('subscription_tier', 'free')
-        plan = Config.SUBSCRIPTION_TIERS.get(tier, Config.SUBSCRIPTION_TIERS['free'])
-        
-        interviews_used = user.get('interviews_used_this_month', 0)
-        monthly_limit = plan['monthly_interviews']
-        
-        # Unlimited interviews for pro tier
-        if monthly_limit == float('inf'):
-            return True, None
-        
-        # Check if user has exceeded limit
-        if interviews_used >= monthly_limit:
-            return False, {
-                'error': 'Monthly interview limit reached',
-                'tier': tier,
-                'interviews_used': interviews_used,
-                'monthly_limit': monthly_limit,
-                'upgrade_url': '/subscription'
-            }
-        
-        return True, None
-    except Exception:
-        return True, None
-
-
-def increment_interview_count(user_id):
-    """Increment the user's monthly interview count"""
-    if user_id == 'guest':
-        return
-    
-    try:
-        mongo.db.users.update_one(
-            {'_id': user_id},
-            {'$inc': {'interviews_used_this_month': 1}}
-        )
-    except Exception:
-        pass
 
 
 def current_user_id():
@@ -78,8 +31,9 @@ def current_user_id():
 @interview_bp.route('/generate-questions', methods=['POST'])
 @token_required
 def generate_questions():
-    # Check subscription limit
-    can_proceed, limit_error = check_subscription_limit(current_user_id())
+    # Check subscription limit using the new subscription service
+    user_id = current_user_id()
+    can_proceed, limit_error = subscription_service.check_interview_limit(user_id)
     if not can_proceed:
         return jsonify(limit_error), 403
     
@@ -112,11 +66,11 @@ def generate_questions():
         if not questions:
             return jsonify({'error': 'No questions could be generated'}), 500
 
-        # Increment interview count
-        increment_interview_count(current_user_id())
+        # Increment interview count using the new subscription service
+        subscription_service.increment_interview_count(user_id)
 
         session_id = str(uuid4())
-        interview = InterviewSession(current_user_id(), job_role, questions)
+        interview = InterviewSession(user_id, job_role, questions)
         session_document = {
             '_id': session_id,
             'user_id': interview.user_id,
@@ -127,7 +81,7 @@ def generate_questions():
             'feedback': [],
         }
         demo_sessions[session_id] = session_document
-        if current_user_id() != 'guest':
+        if user_id != 'guest':
             try:
                 mongo.db.interviews.insert_one(session_document)
             except Exception:

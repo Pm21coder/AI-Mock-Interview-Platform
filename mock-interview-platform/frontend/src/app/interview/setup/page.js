@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import Navigation from '@/components/Navigation';
+import Navigation from '../../../components/Navigation';
 import toast from 'react-hot-toast';
 
 export default function InterviewSetup() {

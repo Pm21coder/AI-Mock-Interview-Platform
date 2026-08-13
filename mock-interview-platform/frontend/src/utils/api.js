@@ -124,16 +124,31 @@ export const createRazorpayOrder = async (data) => {
     const response = await api.post('/api/subscription/create-order', data);
     return response.data;
   } catch (error) {
-    try {
-      console.error('createRazorpayOrder full error:', error);
-    } catch (logErr) {
-      // Swallow logging errors
-    }
-
     const status = error?.response?.status;
     const respData = error?.response?.data;
 
-    console.error('createRazorpayOrder API error summary:', { status, data: respData });
+    // Provide specific context for Gateway errors
+    if (status === 502) {
+      console.error('🔴 502 Bad Gateway Error: The upstream Python backend (Werkzeug) crashed or timed out.');
+      console.error('Backend may have encountered an unhandled exception. Check backend logs and .env configuration.');
+      console.error('Common causes: Missing Razorpay credentials, API key issues, or MongoDB connection problems.');
+    }
+
+    // Log structured error data for debugging
+    console.error('API Error Details:', {
+      endpoint: '/api/subscription/create-order',
+      status,
+      statusText: error?.response?.statusText,
+      message: error?.message,
+      data: respData,
+      request: data,
+    });
+
+    try {
+      console.error('createRazorpayOrder full error object:', error);
+    } catch (logErr) {
+      // Swallow logging errors
+    }
 
     const serverMsg = respData?.error || respData?.message || error?.message || 'Unknown error creating Razorpay order';
     const out = new Error(serverMsg);
@@ -160,4 +175,66 @@ export const reactivateSubscription = async () => {
 export const createCustomerPortal = async () => {
   const response = await api.post('/api/subscription/portal');
   return response.data;
+};
+
+// Enhanced subscription API functions
+export const getUsageStats = async () => {
+  const response = await api.get('/api/subscription/usage-stats');
+  return response.data;
+};
+
+export const getBillingHistory = async (limit = 50) => {
+  const response = await api.get(`/api/subscription/billing-history?limit=${limit}`);
+  return response.data;
+};
+
+export const upgradeSubscription = async (data) => {
+  const response = await api.post('/api/subscription/upgrade', data);
+  return response.data;
+};
+
+export const startTrial = async (tier = 'pro', trialDays = 7) => {
+  const response = await api.post('/api/subscription/trial/start', {
+    tier,
+    trial_days: trialDays,
+  });
+  return response.data;
+};
+
+export const getAvailableFeatures = async () => {
+  const response = await api.get('/api/subscription/features');
+  return response.data;
+};
+
+export const hasFeatureAccess = async (featureName) => {
+  const response = await api.get(`/api/subscription/has-feature/${featureName}`);
+  return response.data.has_access;
+};
+
+// Gemini-powered interview API functions (via Next.js API routes)
+export const generateInterviewQuestions = async (role, category, difficulty) => {
+  try {
+    const response = await axios.post('/api/interview/questions', {
+      role,
+      category,
+      difficulty,
+    });
+    return response.data;
+  } catch (error) {
+    const message = error.response?.data?.error || error.message || 'Failed to generate questions';
+    throw new Error(message);
+  }
+};
+
+export const generateFeedback = async (role, qaPairs) => {
+  try {
+    const response = await axios.post('/api/interview/feedback', {
+      role,
+      qaPairs,
+    });
+    return response.data;
+  } catch (error) {
+    const message = error.response?.data?.error || error.message || 'Failed to generate feedback';
+    throw new Error(message);
+  }
 };

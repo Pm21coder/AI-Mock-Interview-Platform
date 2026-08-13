@@ -3,9 +3,9 @@
 
 import { useState, useCallback, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import Navigation from '@/components/Navigation';
+import Navigation from '../../components/Navigation';
 import toast from 'react-hot-toast';
-import { uploadResume, getResumeHistory } from '@/utils/api';
+import { uploadResume, getResumeHistory, getResumeAnalysis } from '../../utils/api';
 
 export default function ResumePage() {
   const router = useRouter();
@@ -85,7 +85,6 @@ export default function ResumePage() {
 
   const handleViewAnalysis = async (resumeId) => {
     try {
-      const { getResumeAnalysis } = await import('@/utils/api');
       const result = await getResumeAnalysis(resumeId);
       if (result.analysis) {
         setAnalysis(result.analysis);

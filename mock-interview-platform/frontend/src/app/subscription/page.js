@@ -2,12 +2,12 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import Navigation from '@/components/Navigation';
+import Navigation from '../../components/Navigation';
 import {
   createRazorpayOrder,
   getSubscriptionStatus,
   verifyRazorpayPayment,
-} from '@/utils/api';
+} from '../../utils/api';
 
 const RAZORPAY_SCRIPT_URL = 'https://checkout.razorpay.com/v1/checkout.js';
 
@@ -121,23 +121,38 @@ export default function SubscriptionPage() {
       const scriptLoaded = await loadRazorpayScript();
 
       if (!scriptLoaded || !window.Razorpay) {
-        throw new Error('Unable to load Razorpay checkout script. You can use Demo Upgrade mode below.');
+        console.warn('Razorpay SDK not available, falling back to demo mode');
+        // Fall back to demo mode if SDK can't load
+        await handleDemoUpgrade(tier);
+        return;
       }
 
-      const data = await createRazorpayOrder({ tier });
-      const key = data.key_id || process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID;
+      let orderData;
+      try {
+        orderData = await createRazorpayOrder({ tier, demo_mode: false });
+      } catch (orderError) {
+        // If order creation fails with 400 (missing credentials), use demo mode
+        if (orderError.status === 400 && orderError.message?.includes('not configured')) {
+          console.warn('Razorpay credentials not configured, using demo mode for development');
+          await handleDemoUpgrade(tier);
+          return;
+        }
+        throw orderError;
+      }
 
-      if (!data.order_id || !key) {
-        throw new Error(data.error || 'Unable to initialize Razorpay checkout');
+      const key = orderData.key_id || process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID;
+
+      if (!orderData.order_id || !key) {
+        throw new Error(orderData.error || 'Unable to initialize Razorpay checkout');
       }
 
       const authEmail = window.localStorage.getItem('auth_email') || '';
 
       const razorpay = new window.Razorpay({
         key,
-        order_id: data.order_id,
-        currency: data.currency || 'INR',
-        amount: data.amount,
+        order_id: orderData.order_id,
+        currency: orderData.currency || 'INR',
+        amount: orderData.amount,
         name: 'MockInterview AI',
         description: `${tier === 'basic' ? 'Basic' : 'Pro'} plan subscription`,
         prefill: {

@@ -1,9 +1,9 @@
 'use client';
 
 import { useState, useEffect, useCallback, useSyncExternalStore } from 'react';
-import Navigation from '@/components/Navigation';
-import { getDashboardStats } from '@/utils/api';
-import { onSocketEvent, emitSocketEvent } from '@/utils/socket';
+import Navigation from '../../components/Navigation';
+import { getDashboardStats } from '../../utils/api';
+import { onSocketEvent, emitSocketEvent } from '../../utils/socket';
 
 function getDisplayName(email) {
   const localPart = email?.split('@')[0] || '';
