@@ -1,14 +1,30 @@
 /* eslint-disable react-hooks/set-state-in-effect */
 'use client';
 
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useSyncExternalStore } from 'react';
 import { useRouter } from 'next/navigation';
 import Navigation from '../../components/Navigation';
 import toast from 'react-hot-toast';
 import { uploadResume, getResumeHistory, getResumeAnalysis } from '../../utils/api';
 
+// Custom store that tracks auth state
+const authStore = {
+  getSnapshot: () => window.localStorage.getItem('auth_email') || '',
+  subscribe: (callback) => {
+    window.addEventListener('storage', callback);
+    window.addEventListener('auth-change', callback);
+    return () => {
+      window.removeEventListener('storage', callback);
+      window.removeEventListener('auth-change', callback);
+    };
+  },
+};
+
+const getServerAuthEmail = () => '';
+
 export default function ResumePage() {
   const router = useRouter();
+  const userEmail = useSyncExternalStore(authStore.subscribe, authStore.getSnapshot, getServerAuthEmail);
   const [file, setFile] = useState(null);
   const [uploading, setUploading] = useState(false);
   const [analysis, setAnalysis] = useState(null);
@@ -50,6 +66,13 @@ export default function ResumePage() {
 
   const handleUpload = async (e) => {
     e.preventDefault();
+    
+    // Check authentication
+    if (!userEmail) {
+      toast.error('Please sign in to analyze your resume');
+      router.push('/auth');
+      return;
+    }
     
     if (!file) {
       toast.error('Please select a file to upload');
@@ -135,11 +158,17 @@ export default function ResumePage() {
 
               <button
                 type="submit"
-                disabled={!file || uploading}
+                disabled={!file || uploading || !userEmail}
                 className="w-full rounded-lg bg-blue-600 px-6 py-3 font-semibold text-white transition-all duration-200 hover:bg-blue-700 hover:shadow-lg disabled:cursor-not-allowed disabled:bg-blue-300"
               >
                 {uploading ? 'Analyzing Resume...' : 'Upload and Analyze'}
               </button>
+              
+              {!userEmail && (
+                <p className="mt-3 text-sm text-amber-600 bg-amber-50 p-3 rounded-lg">
+                  ℹ️ Please <a href="/auth" className="font-semibold underline hover:text-amber-700">sign in</a> to analyze your resume.
+                </p>
+              )}
             </form>
           </div>
 
