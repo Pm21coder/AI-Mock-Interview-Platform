@@ -36,7 +36,7 @@ npm install
 npm run dev
 ```
 
-Then open http://localhost:3000
+Then open <http://localhost:3000>
 
 ## Environment variables
 
@@ -46,6 +46,7 @@ Then open http://localhost:3000
 ## Notes
 
 This app is structured for a real interview workflow:
+
 - generate questions
 - record webcam answer
 - analyze NLP and AI feedback
