@@ -60,8 +60,26 @@ export const getQuestions = async (params) => {
 };
 
 export const submitAnswer = async (data) => {
-  const response = await api.post('/api/interview/analyze-answer', data);
-  return response.data;
+  try {
+    const response = await api.post('/api/interview/analyze-answer', data);
+    return response.data;
+  } catch (error) {
+    const errorPayload = error.response?.data;
+
+    console.error('submitAnswer API error:', error);
+    if (error.response) {
+      console.error('submitAnswer server response:', errorPayload);
+    }
+
+    if (errorPayload && typeof errorPayload === 'object') {
+      return errorPayload;
+    }
+
+    return {
+      error: 'Failed to connect to analysis service',
+      details: error.message || 'Unable to reach the interview analysis service.',
+    };
+  }
 };
 
 export const getFeedback = async (sessionId) => {

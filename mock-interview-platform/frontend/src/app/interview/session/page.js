@@ -345,12 +345,14 @@ function InterviewSessionContent() {
   const submitCurrentAnswer = useCallback(async (videoBlob, expressionStats) => {
     await stopVoiceInput();
     setIsProcessing(true);
+    setLoadError('');
 
     try {
       const currentQuestion = questions[currentIndex];
       const submittedAnswer = answerRef.current.trim();
       if (!submittedAnswer) {
         toast.error('Please write your answer before submitting it.');
+        setIsProcessing(false);
         return;
       }
 
@@ -363,6 +365,15 @@ function InterviewSessionContent() {
         video_data: Boolean(videoBlob),
         expression_stats: expressionStats || null,
       });
+
+      // Check if response contains an error
+      if (result.error) {
+        const errorMessage = result.details || result.error || 'Failed to analyze answer';
+        setLoadError(`Analysis Error: ${errorMessage}`);
+        toast.error(errorMessage, { duration: 5000 });
+        setIsProcessing(false);
+        return;
+      }
 
       // Attach expression telemetry stats to feedback display
       const enrichedFeedback = {
@@ -378,8 +389,12 @@ function InterviewSessionContent() {
 
       setFeedback(enrichedFeedback);
       toast.success('Answer and Camera Vision Analysis complete!');
+      setLoadError('');
     } catch (error) {
-      toast.error('Failed to analyze answer');
+      const errorMessage = error.response?.data?.error || error.message || 'Failed to analyze answer';
+      setLoadError(`Error: ${errorMessage}`);
+      toast.error(errorMessage, { duration: 5000 });
+      console.error('Answer submission error:', error);
     } finally {
       setIsProcessing(false);
     }
@@ -536,6 +551,19 @@ function InterviewSessionContent() {
             {isProcessing && (
               <div className="mt-4 rounded-lg bg-yellow-100 p-4 text-yellow-700">
                 Processing your answer...
+              </div>
+            )}
+
+            {loadError && (
+              <div className="mt-4 rounded-lg bg-red-50 p-4 border border-red-200">
+                <p className="font-semibold text-red-900 mb-2">⚠️ Analysis Failed</p>
+                <p className="text-red-700 text-sm mb-3">{loadError}</p>
+                <button
+                  onClick={() => setLoadError('')}
+                  className="px-3 py-1 bg-red-200 hover:bg-red-300 text-red-800 rounded text-sm font-medium transition"
+                >
+                  Dismiss
+                </button>
               </div>
             )}
           </div>

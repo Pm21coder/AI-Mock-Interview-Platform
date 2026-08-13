@@ -1,5 +1,6 @@
 from datetime import datetime
 from uuid import uuid4
+import logging
 
 from flask import Blueprint, jsonify, request
 
@@ -12,6 +13,8 @@ from app.services.nlp_service import NLPService
 from app.services.subscription_service import SubscriptionService
 from app.socket_events import emit_dashboard_update
 from app.utils.auth import token_required
+
+logger = logging.getLogger(__name__)
 
 interview_bp = Blueprint('interview', __name__)
 gemini_service = GeminiService()
@@ -105,6 +108,7 @@ def generate_questions():
 @interview_bp.route('/analyze-answer', methods=['POST'])
 @token_required
 def analyze_answer():
+    user_id = current_user_id()
     data = request.get_json(silent=True) or {}
     question = data.get('question')
     answer = (data.get('answer') or '').strip()
@@ -116,10 +120,25 @@ def analyze_answer():
         return jsonify({'error': 'Question and answer are required'}), 400
 
     try:
+        # Check subscription limit before analyzing
+        can_proceed, limit_error = subscription_service.check_interview_limit(user_id)
+        if not can_proceed:
+            return jsonify(limit_error), 403
+
+        # Get subscription tier for premium AI coaching
+        is_premium = subscription_service.should_use_premium_ai_coaching(user_id)
+        
+        # Analyze the answer with appropriate tier
+        gemini_feedback = gemini_service.analyze_answer(
+            question, 
+            answer, 
+            expected_answer, 
+            is_premium=is_premium
+        )
+        
         combined_feedback = {
             'nlp_analysis': nlp_service.analyze_answer_quality(answer, expected_answer),
-            'gemini_feedback': gemini_service.analyze_answer(question, answer, expected_answer, 
-                                                               is_premium=subscription_service.should_use_premium_ai_coaching(user_id)),
+            'gemini_feedback': gemini_feedback,
             'cv_analysis': ({'average_confidence': 0.72, 'overall_assessment': 'Good visual presence', 'total_frames_analyzed': 0}
                             if data.get('video_data') else
                             {'average_confidence': 0.75, 'overall_assessment': 'No video data - estimated from answer quality', 'total_frames_analyzed': 0}),
@@ -128,17 +147,22 @@ def analyze_answer():
         response_record = {'question_index': question_index, 'answer': answer, 'feedback': combined_feedback}
         if session_id in demo_sessions:
             demo_sessions[session_id]['responses'].append(response_record)
-        if current_user_id() != 'guest':
+        if user_id != 'guest':
             try:
                 mongo.db.interviews.update_one(
-                    {'_id': session_id, 'user_id': current_user_id()},
+                    {'_id': session_id, 'user_id': user_id},
                     {'$push': {'responses': response_record}},
                 )
-            except Exception:
-                pass
+            except Exception as db_exc:
+                logger.warning(f'Failed to update interview in DB: {db_exc}')
         return jsonify(combined_feedback)
     except Exception as exc:
-        return jsonify({'error': str(exc)}), 500
+        error_msg = str(exc)
+        logger.error(f'Error analyzing answer for user {user_id}: {error_msg}')
+        return jsonify({
+            'error': 'Failed to analyze answer. Please try again.',
+            'details': error_msg
+        }), 500
 
 
 @interview_bp.route('/get-feedback/<session_id>', methods=['GET'])
