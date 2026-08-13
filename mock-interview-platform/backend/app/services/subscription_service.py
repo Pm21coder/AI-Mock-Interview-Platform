@@ -13,6 +13,11 @@ from app.config import Config
 
 logger = logging.getLogger(__name__)
 
+# Used only when MongoDB is unavailable during local development. Keeping this
+# alongside the subscription service ensures every feature gate and usage check
+# reads the same temporary plan state.
+fallback_subscriptions = {}
+
 
 class SubscriptionStatus(Enum):
     """Subscription status states."""
@@ -59,6 +64,9 @@ class SubscriptionService:
             user = None
 
         if not user:
+            fallback_subscription = fallback_subscriptions.get(str(user_id))
+            if fallback_subscription:
+                return self._get_fallback_subscription(fallback_subscription)
             return self._free_tier_subscription()
 
         tier = user.get('subscription_tier', 'free')
@@ -260,13 +268,17 @@ class SubscriptionService:
 
         # Check actual limit
         if sub['interviews_remaining'] <= 0:
+            required_tier = 'basic' if sub['tier'] == 'free' else 'pro'
             return False, {
                 'error': 'Monthly interview limit reached',
+                'code': 'interview_limit_reached',
                 'tier': sub['tier'],
+                'required_tier': required_tier,
                 'monthly_limit': monthly_limit,
                 'interviews_used': sub['interviews_used_this_month'],
                 'message': f'You have used all {monthly_limit} interviews for this month. '
-                          f'Upgrade your plan to continue.'
+                          f'Upgrade to {required_tier.title()} to continue.',
+                'upgrade_url': '/subscription',
             }
 
         return True, None
@@ -283,6 +295,13 @@ class SubscriptionService:
         """
         if user_id == 'guest':
             return 1
+
+        fallback_subscription = fallback_subscriptions.get(str(user_id))
+        if fallback_subscription:
+            fallback_subscription['interviews_used_this_month'] = (
+                fallback_subscription.get('interviews_used_this_month', 0) + 1
+            )
+            return fallback_subscription['interviews_used_this_month']
 
         try:
             result = mongo.db.users.update_one(
@@ -517,6 +536,36 @@ class SubscriptionService:
             'features': plan_info.get('features', {}),
             'subscription_start_date': None,
             'subscription_end_date': None,
+            'plan_info': plan_info,
+            'is_trial': False,
+            'trial_days_remaining': 0,
+        }
+
+    def _get_fallback_subscription(self, fallback_subscription):
+        """Return a subscription payload for a locally stored paid plan."""
+        tier = fallback_subscription.get('tier', 'free')
+        end_date = fallback_subscription.get('subscription_end_date')
+        if end_date and datetime.utcnow() > end_date:
+            return self._free_tier_subscription()
+
+        plan_info = self.config_tiers.get(tier, self.config_tiers['free'])
+        monthly_limit = plan_info['monthly_interviews']
+        interviews_used = fallback_subscription.get('interviews_used_this_month', 0)
+        interviews_remaining = (
+            max(0, monthly_limit - interviews_used)
+            if monthly_limit != float('inf')
+            else float('inf')
+        )
+
+        return {
+            'tier': tier,
+            'status': fallback_subscription.get('status', 'active'),
+            'interviews_used_this_month': interviews_used,
+            'interviews_remaining': interviews_remaining,
+            'monthly_limit': monthly_limit if monthly_limit != float('inf') else 'unlimited',
+            'features': plan_info['features'],
+            'subscription_start_date': fallback_subscription.get('subscription_start_date'),
+            'subscription_end_date': end_date,
             'plan_info': plan_info,
             'is_trial': False,
             'trial_days_remaining': 0,

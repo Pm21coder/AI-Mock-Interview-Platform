@@ -8,14 +8,13 @@ from razorpay.errors import BadRequestError, GatewayError, ServerError
 
 from app import mongo
 from app.config import Config
-from app.services.subscription_service import SubscriptionService
+from app.services.subscription_service import SubscriptionService, fallback_subscriptions
 from app.utils.auth import token_required
 
 subscription_bp = Blueprint('subscription', __name__)
 subscription_service = SubscriptionService()
 
 fallback_razorpay_orders = {}
-fallback_subscriptions = {}
 
 # Initialize the Razorpay client. Credentials come from environment variables
 # (Config.RAZORPAY_KEY_ID / RAZORPAY_KEY_SECRET) so that secrets are never
@@ -478,6 +477,8 @@ def get_question_categories():
         return jsonify({
             'available_categories': categories,
             'tier': sub['tier'],
+            'interviews_remaining': sub['interviews_remaining'],
+            'monthly_limit': sub['monthly_limit'],
             'all_categories_available': categories == ['technical', 'behavioral', 'situational', 'system_design']
         }), 200
     except Exception as e:
@@ -686,4 +687,3 @@ def _get_detailed_breakdown(interviews):
         del breakdown[category]['scores']  # Remove raw scores from response
     
     return breakdown
-

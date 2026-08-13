@@ -22,6 +22,21 @@ function getSpeechErrorMessage(error) {
   return messages[error] || `Voice input stopped (${error || 'unknown error'}). Please try again.`;
 }
 
+function getQuestionLoadError(error) {
+  const responseData = error.response?.data || {};
+  const isPlanRestriction = error.response?.status === 403 && (
+    responseData.code === 'interview_limit_reached' ||
+    responseData.code === 'category_not_in_plan' ||
+    Boolean(responseData.required_tier)
+  );
+
+  return {
+    isPlanRestriction,
+    message: responseData.message || responseData.error ||
+      'Failed to load interview questions. Please try again.',
+  };
+}
+
 export default function InterviewSessionPage() {
   return (
     <Suspense fallback={<SessionLoading />}>
@@ -55,6 +70,7 @@ function InterviewSessionContent() {
   const [sessionId, setSessionId] = useState(null);
   const [answer, setAnswer] = useState('');
   const [loadError, setLoadError] = useState('');
+  const [canUpgradeForLoadError, setCanUpgradeForLoadError] = useState(false);
   const [speechState, setSpeechState] = useState('checking');
   const [speechMessage, setSpeechMessage] = useState('');
   const [timeElapsed, setTimeElapsed] = useState(0);
@@ -287,6 +303,9 @@ function InterviewSessionContent() {
       const difficulty = params.get('difficulty') || 'medium';
       const numQuestions = Number(params.get('num_questions') || 5);
 
+      setLoadError('');
+      setCanUpgradeForLoadError(false);
+
       try {
         const data = await getQuestions({
           job_role: jobRole,
@@ -294,11 +313,20 @@ function InterviewSessionContent() {
           difficulty,
           num_questions: numQuestions,
         });
+        if (!Array.isArray(data.questions) || data.questions.length === 0) {
+          throw new Error('No interview questions were generated. Please try again.');
+        }
         setSessionId(data.session_id || 'session_123');
-        setQuestions(data.questions || []);
+        setQuestions(data.questions);
       } catch (error) {
-        setLoadError(error.response?.data?.error || 'Failed to load interview questions. Please ensure the backend is running.');
-        toast.error('Failed to load interview questions');
+        const questionLoadError = getQuestionLoadError(error);
+        setLoadError(questionLoadError.message);
+        setCanUpgradeForLoadError(questionLoadError.isPlanRestriction);
+        toast.error(questionLoadError.message, { duration: 5000 });
+
+        if (!error.response || error.response.status >= 500) {
+          console.error('Failed to load interview questions:', error);
+        }
       }
     };
 
@@ -436,9 +464,32 @@ function InterviewSessionContent() {
       <div className="min-h-screen bg-gray-50">
         <Navigation />
         <div className="flex h-64 items-center justify-center">
-          <div className="max-w-lg text-center text-xl text-gray-600">
-            {loadError || 'Loading questions...'}
-          </div>
+          {loadError ? (
+            <div className="max-w-lg rounded-xl border border-red-200 bg-white p-6 text-center shadow-sm">
+              <h2 className="text-xl font-semibold text-gray-900">Unable to start interview</h2>
+              <p className="mt-2 text-gray-600">{loadError}</p>
+              <div className="mt-5 flex flex-wrap justify-center gap-3">
+                {canUpgradeForLoadError && (
+                  <button
+                    type="button"
+                    onClick={() => router.push('/subscription')}
+                    className="rounded-lg bg-blue-600 px-4 py-2 font-semibold text-white hover:bg-blue-700"
+                  >
+                    View plans
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => router.push('/interview/setup')}
+                  className="rounded-lg border border-gray-300 px-4 py-2 font-semibold text-gray-700 hover:bg-gray-50"
+                >
+                  Back to setup
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="text-xl text-gray-600">Loading questions...</div>
+          )}
         </div>
       </div>
     );
@@ -559,7 +610,10 @@ function InterviewSessionContent() {
                 <p className="font-semibold text-red-900 mb-2">⚠️ Analysis Failed</p>
                 <p className="text-red-700 text-sm mb-3">{loadError}</p>
                 <button
-                  onClick={() => setLoadError('')}
+                  onClick={() => {
+                    setLoadError('');
+                    setCanUpgradeForLoadError(false);
+                  }}
                   className="px-3 py-1 bg-red-200 hover:bg-red-300 text-red-800 rounded text-sm font-medium transition"
                 >
                   Dismiss

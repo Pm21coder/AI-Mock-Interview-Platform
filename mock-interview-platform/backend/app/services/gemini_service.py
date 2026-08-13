@@ -459,6 +459,19 @@ class GeminiService:
                 },
             ]
 
+        # A fallback must always produce the requested number of questions.
+        # Some role/category pools intentionally contain fewer examples, so
+        # reuse those as clearly labelled follow-ups rather than returning an
+        # undersized result (or, previously, None).
+        questions = []
+        for index in range(num_questions):
+            question = dict(pool[index % len(pool)])
+            if index >= len(pool):
+                question['question'] = f"Follow-up: {question['question']}"
+            questions.append(question)
+
+        return questions
+
     @staticmethod
     def _parse_json_response(text):
         """Parse JSON from response text, handling markdown code fences and common formatting issues."""

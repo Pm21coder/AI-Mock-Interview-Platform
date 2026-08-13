@@ -10,6 +10,11 @@ export default function InterviewSetup() {
   const router = useRouter();
   const [availableCategories, setAvailableCategories] = useState(['technical', 'behavioral']);
   const [loadingCategories, setLoadingCategories] = useState(true);
+  const [planDetails, setPlanDetails] = useState({
+    tier: 'free',
+    interviewsRemaining: 3,
+    monthlyLimit: 3,
+  });
   const [formData, setFormData] = useState({
     job_role: '',
     category: 'technical',
@@ -23,9 +28,16 @@ export default function InterviewSetup() {
         const response = await getQuestionCategories();
         const categories = response?.available_categories || ['technical', 'behavioral'];
         setAvailableCategories(categories);
-        if (!categories.includes(formData.category)) {
-          setFormData((prev) => ({ ...prev, category: categories[0] || 'technical' }));
-        }
+        setPlanDetails({
+          tier: response?.tier || 'free',
+          interviewsRemaining: response?.interviews_remaining ?? 3,
+          monthlyLimit: response?.monthly_limit ?? 3,
+        });
+        setFormData((prev) => (
+          categories.includes(prev.category)
+            ? prev
+            : { ...prev, category: categories[0] || 'technical' }
+        ));
       } catch (error) {
         console.error('Failed to load question categories:', error);
         setAvailableCategories(['technical', 'behavioral']);
@@ -35,7 +47,7 @@ export default function InterviewSetup() {
     };
 
     fetchCategories();
-  }, [formData.category]);
+  }, []);
 
   const handleSubmit = (e) => {
     e.preventDefault();
@@ -115,6 +127,28 @@ export default function InterviewSetup() {
                 </select>
               </div>
             </div>
+
+            {!loadingCategories && (
+              <div className="rounded-lg border border-blue-100 bg-blue-50 p-4 text-sm text-blue-900">
+                <p className="font-semibold">
+                  {planDetails.tier.charAt(0).toUpperCase() + planDetails.tier.slice(1)} plan access
+                </p>
+                <p className="mt-1 text-blue-800">
+                  {planDetails.monthlyLimit === 'unlimited'
+                    ? 'Unlimited mock interviews and all question categories.'
+                    : `${planDetails.interviewsRemaining} of ${planDetails.monthlyLimit} mock interviews remain this month.`}
+                </p>
+                {planDetails.tier === 'free' && (
+                  <button
+                    type="button"
+                    onClick={() => router.push('/subscription')}
+                    className="mt-3 font-semibold text-blue-700 underline hover:text-blue-900"
+                  >
+                    Upgrade to unlock all categories and more interviews
+                  </button>
+                )}
+              </div>
+            )}
 
             <div>
               <label className="mb-2 block text-sm font-medium text-gray-700">Number of Questions</label>

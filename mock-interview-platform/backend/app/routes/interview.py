@@ -31,32 +31,31 @@ def current_user_id():
     return str(request.current_user.get('_id', 'guest'))
 
 
+def current_subscription_user_id():
+    """Keep ObjectIds intact for subscription and feature lookups."""
+    return request.current_user.get('_id', 'guest')
+
+
 @interview_bp.route('/generate-questions', methods=['POST'])
 @token_required
 def generate_questions():
-    # Check subscription limit using the new subscription service
-    user_id = current_user_id()
-    can_proceed, limit_error = subscription_service.check_interview_limit(user_id)
-    if not can_proceed:
-        return jsonify(limit_error), 403
-    
     data = request.get_json(silent=True) or {}
     job_role = (data.get('job_role') or '').strip()
-    category = data.get('category', 'technical')
-    difficulty = data.get('difficulty', 'medium')
+    category = (data.get('category') or 'technical').strip().lower()
+    difficulty = (data.get('difficulty') or 'medium').strip().lower()
 
     if not job_role:
         return jsonify({'error': 'Job role is required'}), 400
 
-    # Validate question category based on subscription tier
-    available_categories = subscription_service.get_available_question_categories(user_id)
-    if available_categories != 'all' and category not in available_categories:
+    valid_categories = {'technical', 'behavioral', 'situational', 'system_design'}
+    if category not in valid_categories:
         return jsonify({
-            'error': f'Category "{category}" is not available in your plan. '
-                    f'Available categories: {", ".join(available_categories)}. '
-                    f'Upgrade to Basic or Pro plan for all categories.',
-            'available_categories': available_categories,
-        }), 403
+            'error': 'Invalid question category',
+            'available_categories': sorted(valid_categories),
+        }), 400
+
+    if difficulty not in {'easy', 'medium', 'hard'}:
+        return jsonify({'error': 'Difficulty must be easy, medium, or hard'}), 400
 
     try:
         num_questions = int(data.get('num_questions', 5))
@@ -64,6 +63,32 @@ def generate_questions():
         return jsonify({'error': 'num_questions must be a number'}), 400
     if not 1 <= num_questions <= 10:
         return jsonify({'error': 'num_questions must be between 1 and 10'}), 400
+
+    user_id = current_user_id()
+    subscription_user_id = current_subscription_user_id()
+    can_proceed, limit_error = subscription_service.check_interview_limit(
+        subscription_user_id,
+    )
+    if not can_proceed:
+        return jsonify(limit_error), 403
+
+    # Validate question category based on subscription tier
+    available_categories = subscription_service.get_available_question_categories(
+        subscription_user_id,
+    )
+    if category not in available_categories:
+        subscription = subscription_service.get_user_subscription(subscription_user_id)
+        return jsonify({
+            'error': f'Category "{category}" is not available in your plan. '
+                    f'Available categories: {", ".join(available_categories)}. '
+                    f'Upgrade to Basic or Pro plan for all categories.',
+            'code': 'category_not_in_plan',
+            'tier': subscription['tier'],
+            'required_tier': 'basic',
+            'available_categories': available_categories,
+            'message': 'This question category requires the Basic or Pro plan.',
+            'upgrade_url': '/subscription',
+        }), 403
 
     try:
         generated = gemini_service.generate_questions(job_role, category, difficulty, num_questions)
@@ -80,7 +105,7 @@ def generate_questions():
             return jsonify({'error': 'No questions could be generated'}), 500
 
         # Increment interview count using the new subscription service
-        subscription_service.increment_interview_count(user_id)
+        subscription_service.increment_interview_count(subscription_user_id)
 
         session_id = str(uuid4())
         interview = InterviewSession(user_id, job_role, questions)
@@ -109,6 +134,7 @@ def generate_questions():
 @token_required
 def analyze_answer():
     user_id = current_user_id()
+    subscription_user_id = current_subscription_user_id()
     data = request.get_json(silent=True) or {}
     question = data.get('question')
     answer = (data.get('answer') or '').strip()
@@ -120,7 +146,10 @@ def analyze_answer():
         return jsonify({'error': 'Question and answer are required'}), 400
 
     try:
-        if data.get('video_data') and not subscription_service.has_feature(user_id, 'video_analysis'):
+        if data.get('video_data') and not subscription_service.has_feature(
+            subscription_user_id,
+            'video_analysis',
+        ):
             return jsonify({
                 'error': 'Video analysis is only available on Basic and Pro plans.',
                 'required_tier': 'basic',
@@ -128,7 +157,9 @@ def analyze_answer():
             }), 403
 
         # Get subscription tier for premium AI coaching
-        is_premium = subscription_service.should_use_premium_ai_coaching(user_id)
+        is_premium = subscription_service.should_use_premium_ai_coaching(
+            subscription_user_id,
+        )
         
         # Analyze the answer with appropriate tier
         gemini_feedback = gemini_service.analyze_answer(

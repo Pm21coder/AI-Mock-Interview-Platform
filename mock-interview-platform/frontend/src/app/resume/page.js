@@ -99,8 +99,25 @@ export default function ResumePage() {
         toast.error(result.error || 'Failed to analyze resume');
       }
     } catch (error) {
-      toast.error('Failed to upload resume. Please try again.');
-      console.error('Upload error:', error);
+      const responseData = error.response?.data;
+
+      if (error.response?.status === 403 && responseData?.required_tier === 'pro') {
+        toast.error(
+          responseData.message || 'Resume analysis is available with the Pro plan.',
+        );
+        router.push('/subscription');
+        return;
+      }
+
+      toast.error(
+        responseData?.message ||
+          responseData?.error ||
+          'Failed to upload resume. Please try again.',
+      );
+
+      if (!error.response || error.response.status >= 500) {
+        console.error('Resume upload failed:', error);
+      }
     } finally {
       setUploading(false);
     }

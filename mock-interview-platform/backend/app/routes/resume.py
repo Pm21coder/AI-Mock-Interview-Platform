@@ -29,13 +29,15 @@ def upload_resume():
     if not request.current_user or not hasattr(request.current_user, 'get'):
         return jsonify({'error': 'Authentication required'}), 401
 
-    user_id = str(request.current_user.get('_id', 'guest'))
-    if not subscription_service.has_feature(user_id, 'resume_review'):
+    subscription_user_id = request.current_user.get('_id', 'guest')
+    if not subscription_service.has_feature(subscription_user_id, 'resume_review'):
         return jsonify({
             'error': 'Resume review is only available on the Pro plan.',
             'required_tier': 'pro',
             'message': 'Upgrade to Pro to unlock resume analysis.'
         }), 403
+
+    user_id = str(subscription_user_id)
 
     # Check if file is in request
     if 'file' not in request.files:
