@@ -45,6 +45,16 @@ def generate_questions():
     if not job_role:
         return jsonify({'error': 'Job role is required'}), 400
 
+    # Validate question category based on subscription tier
+    available_categories = subscription_service.get_available_question_categories(user_id)
+    if available_categories != 'all' and category not in available_categories:
+        return jsonify({
+            'error': f'Category "{category}" is not available in your plan. '
+                    f'Available categories: {", ".join(available_categories)}. '
+                    f'Upgrade to Basic or Pro plan for all categories.',
+            'available_categories': available_categories,
+        }), 403
+
     try:
         num_questions = int(data.get('num_questions', 5))
     except (TypeError, ValueError):
@@ -108,7 +118,8 @@ def analyze_answer():
     try:
         combined_feedback = {
             'nlp_analysis': nlp_service.analyze_answer_quality(answer, expected_answer),
-            'gemini_feedback': gemini_service.analyze_answer(question, answer, expected_answer),
+            'gemini_feedback': gemini_service.analyze_answer(question, answer, expected_answer, 
+                                                               is_premium=subscription_service.should_use_premium_ai_coaching(user_id)),
             'cv_analysis': ({'average_confidence': 0.72, 'overall_assessment': 'Good visual presence', 'total_frames_analyzed': 0}
                             if data.get('video_data') else
                             {'average_confidence': 0.75, 'overall_assessment': 'No video data - estimated from answer quality', 'total_frames_analyzed': 0}),

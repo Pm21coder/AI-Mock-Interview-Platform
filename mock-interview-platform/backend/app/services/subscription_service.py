@@ -588,3 +588,138 @@ class SubscriptionService:
                     count += 1
 
         return total_score / count if count > 0 else None
+
+    # ========================
+    # Feature Access Methods
+    # ========================
+
+    def get_available_question_categories(self, user_id):
+        """
+        Get the list of question categories available to a user based on tier.
+
+        Args:
+            user_id: The user's MongoDB ObjectId
+
+        Returns:
+            list: Available category names or 'all' for unlimited
+        """
+        sub = self.get_user_subscription(user_id)
+        tier = sub['tier']
+        plan_info = self.config_tiers.get(tier, {})
+        
+        categories_access = plan_info.get('question_categories', 'standard')
+        
+        if categories_access == 'all':
+            return ['technical', 'behavioral', 'situational', 'system_design']
+        else:
+            # Free tier: standard categories only
+            return ['technical', 'behavioral']
+
+    def get_feedback_history_days(self, user_id):
+        """
+        Get the number of days feedback history should be retained for a user.
+
+        Args:
+            user_id: The user's MongoDB ObjectId
+
+        Returns:
+            int or None: Days to retain (None = unlimited)
+        """
+        sub = self.get_user_subscription(user_id)
+        tier = sub['tier']
+        plan_info = self.config_tiers.get(tier, {})
+        
+        return plan_info.get('feedback_history_days', 7)
+
+    def filter_feedback_by_history_limit(self, user_id, feedback_records):
+        """
+        Filter feedback records based on user's subscription tier.
+
+        Args:
+            user_id: The user's MongoDB ObjectId
+            feedback_records: List of feedback records with timestamp
+
+        Returns:
+            list: Filtered feedback records
+        """
+        history_days = self.get_feedback_history_days(user_id)
+        
+        if history_days is None:
+            # Unlimited history
+            return feedback_records
+        
+        cutoff_date = datetime.utcnow() - timedelta(days=history_days)
+        filtered = []
+        
+        for record in feedback_records:
+            timestamp = record.get('timestamp') or record.get('created_at')
+            if timestamp:
+                if isinstance(timestamp, str):
+                    try:
+                        timestamp = datetime.fromisoformat(timestamp)
+                    except (ValueError, TypeError):
+                        continue
+                if timestamp >= cutoff_date:
+                    filtered.append(record)
+            else:
+                # Keep records without timestamp
+                filtered.append(record)
+        
+        return filtered
+
+    def should_use_premium_ai_coaching(self, user_id):
+        """
+        Check if user should receive premium AI coaching (Pro tier feature).
+
+        Args:
+            user_id: The user's MongoDB ObjectId
+
+        Returns:
+            bool: True if user has premium AI coaching
+        """
+        return self.has_feature(user_id, 'premium_ai_coaching')
+
+    def has_advanced_analytics(self, user_id):
+        """
+        Check if user has access to advanced analytics (Pro tier feature).
+
+        Args:
+            user_id: The user's MongoDB ObjectId
+
+        Returns:
+            bool: True if user has advanced analytics access
+        """
+        return self.has_feature(user_id, 'advanced_analytics')
+
+    def has_email_support(self, user_id):
+        """
+        Check if user has access to email support (Basic+ tier feature).
+
+        Args:
+            user_id: The user's MongoDB ObjectId
+
+        Returns:
+            bool: True if user has email support
+        """
+        return self.has_feature(user_id, 'email_support')
+
+    def get_plan_comparison(self):
+        """
+        Get a detailed comparison of all subscription plans.
+
+        Returns:
+            dict: Plan comparison with all features
+        """
+        comparison = {}
+        
+        for tier_name, tier_config in self.config_tiers.items():
+            comparison[tier_name] = {
+                'name': tier_config.get('name', ''),
+                'price': tier_config.get('price', 0),
+                'monthly_interviews': tier_config.get('monthly_interviews', 0),
+                'feedback_history_days': tier_config.get('feedback_history_days'),
+                'question_categories': tier_config.get('question_categories', 'standard'),
+                'features': tier_config.get('features', {}),
+            }
+        
+        return comparison

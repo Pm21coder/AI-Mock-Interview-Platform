@@ -70,6 +70,8 @@ class Config:
             'name': 'Free',
             'price': 0,
             'monthly_interviews': 3,
+            'feedback_history_days': 7,  # Free tier: 7-day history
+            'question_categories': 'standard',  # standard categories only
             'features': {
                 'basic_feedback': True,
                 'advanced_feedback': False,
@@ -78,12 +80,18 @@ class Config:
                 'custom_scenarios': False,
                 'priority_support': False,
                 'resume_review': False,
+                'premium_ai_coaching': False,
+                'advanced_analytics': False,
+                'email_support': False,
+                'all_question_categories': False,
             }
         },
         'basic': {
             'name': 'Basic',
             'price': 5,
             'monthly_interviews': 15,
+            'feedback_history_days': None,  # Unlimited history
+            'question_categories': 'all',  # All categories available
             'features': {
                 'basic_feedback': True,
                 'advanced_feedback': True,
@@ -92,12 +100,18 @@ class Config:
                 'custom_scenarios': False,
                 'priority_support': False,
                 'resume_review': False,
+                'premium_ai_coaching': False,
+                'advanced_analytics': False,
+                'email_support': True,
+                'all_question_categories': True,
             }
         },
         'pro': {
             'name': 'Pro',
             'price': 10,
             'monthly_interviews': float('inf'),  # Unlimited
+            'feedback_history_days': None,  # Unlimited history
+            'question_categories': 'all',  # All categories available
             'features': {
                 'basic_feedback': True,
                 'advanced_feedback': True,
@@ -106,6 +120,10 @@ class Config:
                 'custom_scenarios': True,
                 'priority_support': True,
                 'resume_review': True,
+                'premium_ai_coaching': True,
+                'advanced_analytics': True,
+                'email_support': True,
+                'all_question_categories': True,
             }
         }
     }

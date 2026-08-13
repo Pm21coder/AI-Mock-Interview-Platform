@@ -463,3 +463,225 @@ def check_feature_access(feature_name):
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+
+@subscription_bp.route('/question-categories', methods=['GET'])
+@token_required
+def get_question_categories():
+    """Get available question categories for the user's subscription tier"""
+    current_user = _get_current_user()
+    user_id = current_user['_id']
+
+    try:
+        categories = subscription_service.get_available_question_categories(user_id)
+        sub = subscription_service.get_user_subscription(user_id)
+        
+        return jsonify({
+            'available_categories': categories,
+            'tier': sub['tier'],
+            'all_categories_available': categories == ['technical', 'behavioral', 'situational', 'system_design']
+        }), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@subscription_bp.route('/analytics', methods=['GET'])
+@token_required
+def get_advanced_analytics():
+    """Get advanced analytics dashboard for Pro tier users"""
+    current_user = _get_current_user()
+    user_id = current_user['_id']
+
+    try:
+        # Check if user has advanced analytics access
+        if not subscription_service.has_advanced_analytics(user_id):
+            return jsonify({
+                'error': 'Advanced analytics is only available to Pro tier subscribers',
+                'required_tier': 'pro'
+            }), 403
+
+        # Get usage stats
+        usage_stats = subscription_service.get_usage_stats(user_id)
+        sub = subscription_service.get_user_subscription(user_id)
+
+        # Fetch interview data for analytics
+        try:
+            interviews = list(mongo.db.interviews.find({'user_id': user_id}).limit(100))
+        except Exception:
+            interviews = []
+
+        # Calculate advanced metrics
+        advanced_metrics = {
+            'total_interviews': usage_stats['total_interviews'],
+            'interviews_this_month': usage_stats['interviews_this_month'],
+            'interviews_by_category': usage_stats['interviews_by_category'],
+            'most_common_role': usage_stats['most_common_role'],
+            'average_score': usage_stats['average_score'],
+            'tier': sub['tier'],
+            'plan_info': {
+                'name': sub['plan_info'].get('name'),
+                'price': sub['plan_info'].get('price'),
+                'monthly_interviews': sub['monthly_limit'],
+            },
+            'performance_trend': _calculate_performance_trend(interviews),
+            'detailed_breakdown': _get_detailed_breakdown(interviews),
+        }
+
+        return jsonify(advanced_metrics), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@subscription_bp.route('/email-support', methods=['POST'])
+@token_required
+def submit_email_support():
+    """Submit a support email request (Basic+ tier only)"""
+    current_user = _get_current_user()
+    user_id = current_user['_id']
+
+    try:
+        # Check if user has email support access
+        if not subscription_service.has_email_support(user_id):
+            return jsonify({
+                'error': 'Email support is only available in Basic and Pro plans',
+                'required_tier': 'basic'
+            }), 403
+
+        data = request.get_json(silent=True) or {}
+        subject = (data.get('subject') or '').strip()
+        message = (data.get('message') or '').strip()
+
+        if not subject or not message:
+            return jsonify({'error': 'Subject and message are required'}), 400
+
+        # Store support request in database
+        support_request = {
+            'user_id': user_id,
+            'email': current_user.get('email'),
+            'subject': subject,
+            'message': message,
+            'timestamp': datetime.utcnow(),
+            'status': 'open',
+            'tier': subscription_service.get_user_subscription(user_id)['tier'],
+        }
+
+        try:
+            mongo.db.support_requests.insert_one(support_request)
+        except Exception:
+            # If MongoDB unavailable, still return success for demo
+            pass
+
+        return jsonify({
+            'success': True,
+            'message': 'Your support request has been submitted. Our team will respond within 24 hours.',
+            'request_id': support_request.get('_id', 'pending')
+        }), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@subscription_bp.route('/plan-comparison', methods=['GET'])
+def get_plan_comparison():
+    """Get a detailed comparison of all subscription plans"""
+    try:
+        comparison = subscription_service.get_plan_comparison()
+        return jsonify({
+            'plans': comparison
+        }), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@subscription_bp.route('/feedback-history-limit', methods=['GET'])
+@token_required
+def get_feedback_history_limit():
+    """Get the feedback history retention limit for the user's tier"""
+    current_user = _get_current_user()
+    user_id = current_user['_id']
+
+    try:
+        history_days = subscription_service.get_feedback_history_days(user_id)
+        sub = subscription_service.get_user_subscription(user_id)
+
+        return jsonify({
+            'tier': sub['tier'],
+            'feedback_history_days': history_days,
+            'unlimited': history_days is None,
+            'message': 'Unlimited feedback history' if history_days is None else f'Feedback retained for {history_days} days'
+        }), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+# ========================
+# Helper Functions
+# ========================
+
+def _calculate_performance_trend(interviews):
+    """Calculate performance trend over time"""
+    if not interviews:
+        return {'trend': 'no_data', 'average': 0}
+
+    scores = []
+    for interview in interviews:
+        feedback = interview.get('feedback', [])
+        for item in feedback:
+            if isinstance(item, dict) and 'score' in item:
+                scores.append(item['score'])
+
+    if not scores:
+        return {'trend': 'no_data', 'average': 0}
+
+    avg = sum(scores) / len(scores)
+    
+    # Determine trend based on recent vs overall
+    recent_scores = scores[-5:] if len(scores) >= 5 else scores
+    recent_avg = sum(recent_scores) / len(recent_scores)
+
+    if recent_avg > avg:
+        trend = 'improving'
+    elif recent_avg < avg:
+        trend = 'declining'
+    else:
+        trend = 'stable'
+
+    return {
+        'trend': trend,
+        'average': round(avg, 2),
+        'recent_average': round(recent_avg, 2)
+    }
+
+
+def _get_detailed_breakdown(interviews):
+    """Get detailed breakdown of interview performance by category"""
+    breakdown = {}
+    
+    for interview in interviews:
+        questions = interview.get('questions', [])
+        feedback = interview.get('feedback', [])
+        
+        for i, question in enumerate(questions):
+            category = question.get('category', 'unknown')
+            
+            if category not in breakdown:
+                breakdown[category] = {
+                    'count': 0,
+                    'average_score': 0,
+                    'scores': []
+                }
+            
+            breakdown[category]['count'] += 1
+            
+            # Get score for this question if available
+            if i < len(feedback) and isinstance(feedback[i], dict):
+                score = feedback[i].get('score', 0)
+                breakdown[category]['scores'].append(score)
+    
+    # Calculate averages
+    for category in breakdown:
+        if breakdown[category]['scores']:
+            avg = sum(breakdown[category]['scores']) / len(breakdown[category]['scores'])
+            breakdown[category]['average_score'] = round(avg, 2)
+        del breakdown[category]['scores']  # Remove raw scores from response
+    
+    return breakdown
+

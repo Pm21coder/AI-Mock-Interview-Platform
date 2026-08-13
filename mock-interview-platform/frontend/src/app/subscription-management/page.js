@@ -3,12 +3,16 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Navigation from '../../components/Navigation';
+import AdvancedAnalyticsDashboard from '../../components/AdvancedAnalyticsDashboard';
+import EmailSupportWidget from '../../components/EmailSupportWidget';
 import {
   getSubscriptionStatus,
   getUsageStats,
   getBillingHistory,
   getAvailableFeatures,
   cancelSubscription,
+  getQuestionCategories,
+  getFeedbackHistoryLimit,
 } from '../../utils/api';
 
 export default function SubscriptionManagementPage() {
@@ -17,6 +21,8 @@ export default function SubscriptionManagementPage() {
   const [usageStats, setUsageStats] = useState(null);
   const [billingHistory, setBillingHistory] = useState([]);
   const [features, setFeatures] = useState({});
+  const [questionCategories, setQuestionCategories] = useState(null);
+  const [feedbackHistoryLimit, setFeedbackHistoryLimit] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [cancelLoading, setCancelLoading] = useState(false);
@@ -28,11 +34,13 @@ export default function SubscriptionManagementPage() {
         setLoading(true);
         setError(null);
 
-        const [subData, statsData, historyData, featuresData] = await Promise.all([
+        const [subData, statsData, historyData, featuresData, categoriesData, historyLimitData] = await Promise.all([
           getSubscriptionStatus(),
           getUsageStats(),
           getBillingHistory(),
           getAvailableFeatures(),
+          getQuestionCategories().catch(() => null),
+          getFeedbackHistoryLimit().catch(() => null),
         ]);
 
         if (subData.error) {
@@ -51,6 +59,14 @@ export default function SubscriptionManagementPage() {
 
         if (featuresData && featuresData.features) {
           setFeatures(featuresData.features);
+        }
+
+        if (categoriesData) {
+          setQuestionCategories(categoriesData);
+        }
+
+        if (historyLimitData) {
+          setFeedbackHistoryLimit(historyLimitData);
         }
       } catch (err) {
         setError('Failed to load subscription data');
@@ -299,6 +315,58 @@ export default function SubscriptionManagementPage() {
               ))}
             </div>
           </div>
+        </div>
+
+        {/* Additional Subscription Details */}
+        <div className="mt-8 space-y-8">
+          {/* Question Categories Info */}
+          {questionCategories && (
+            <div className="rounded-lg bg-white p-6 shadow-lg">
+              <h2 className="mb-4 text-lg font-bold text-gray-900">📚 Question Categories</h2>
+              <p className="mb-4 text-gray-600">Available question categories for your tier:</p>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                {questionCategories.available_categories.map((category) => (
+                  <div key={category} className="rounded-lg bg-blue-50 p-3 text-center">
+                    <p className="font-medium text-blue-900 capitalize">{category.replace('_', ' ')}</p>
+                  </div>
+                ))}
+              </div>
+              {!questionCategories.all_categories_available && (
+                <p className="mt-4 text-sm text-amber-700 bg-amber-50 p-3 rounded-lg">
+                  💡 Upgrade to Basic or Pro to access all question categories.
+                </p>
+              )}
+            </div>
+          )}
+
+          {/* Feedback History Limit */}
+          {feedbackHistoryLimit && (
+            <div className="rounded-lg bg-white p-6 shadow-lg">
+              <h2 className="mb-4 text-lg font-bold text-gray-900">📋 Feedback History Retention</h2>
+              <div className="bg-gradient-to-r from-blue-50 to-indigo-50 p-4 rounded-lg">
+                <p className="text-lg font-semibold text-gray-900">{feedbackHistoryLimit.message}</p>
+                <p className="text-sm text-gray-600 mt-2">
+                  Your feedback and interview records are securely stored and accessible on your dashboard.
+                </p>
+              </div>
+            </div>
+          )}
+
+          {/* Advanced Analytics - Pro Only */}
+          {subscription?.tier === 'pro' && (
+            <div className="rounded-lg bg-white p-6 shadow-lg">
+              <AdvancedAnalyticsDashboard />
+            </div>
+          )}
+
+          {/* Email Support - Basic+ */}
+          {(subscription?.tier === 'basic' || subscription?.tier === 'pro') && (
+            <div className="rounded-lg bg-white p-6 shadow-lg">
+              <h2 className="mb-4 text-lg font-bold text-gray-900">💬 Email Support</h2>
+              <p className="mb-4 text-gray-600">Get help from our support team. We'll respond within 24 hours.</p>
+              <EmailSupportWidget />
+            </div>
+          )}
         </div>
 
         {/* Billing History */}

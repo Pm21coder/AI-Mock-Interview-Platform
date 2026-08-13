@@ -238,3 +238,32 @@ export const generateFeedback = async (role, qaPairs) => {
     throw new Error(message);
   }
 };
+
+// New subscription features API
+export const getQuestionCategories = async () => {
+  const response = await api.get('/api/subscription/question-categories');
+  return response.data;
+};
+
+export const getAdvancedAnalytics = async () => {
+  const response = await api.get('/api/subscription/analytics');
+  return response.data;
+};
+
+export const submitEmailSupport = async (subject, message) => {
+  const response = await api.post('/api/subscription/email-support', {
+    subject,
+    message,
+  });
+  return response.data;
+};
+
+export const getPlanComparison = async () => {
+  const response = await api.get('/api/subscription/plan-comparison');
+  return response.data;
+};
+
+export const getFeedbackHistoryLimit = async () => {
+  const response = await api.get('/api/subscription/feedback-history-limit');
+  return response.data;
+};

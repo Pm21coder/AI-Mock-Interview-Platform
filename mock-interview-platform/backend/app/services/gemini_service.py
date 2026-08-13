@@ -248,7 +248,17 @@ class GeminiService:
             print(f'Exception details: {type(exc).__name__}: {exc}')
             return self.get_fallback_questions(job_role, category, num_questions)
 
-    def analyze_answer(self, question, user_answer, expected_answer):
+    def analyze_answer(self, question, user_answer, expected_answer, is_premium=False):
+        # Premium users get more detailed coaching
+        detail_level = "detailed" if is_premium else "standard"
+        coaching_prompt = """
+        Additionally, provide personalized AI coaching based on these areas:
+        - Industry best practices
+        - Communication techniques
+        - Career development insights
+        - Interview strategy tips
+        """ if is_premium else ""
+
         prompt = f"""
         Analyze this interview answer:
 
@@ -261,6 +271,7 @@ class GeminiService:
         2. Structure and clarity
         3. Areas for improvement
         4. Overall score (0-100)
+        {coaching_prompt}
 
         Format as JSON:
         {{
@@ -271,21 +282,22 @@ class GeminiService:
             "strengths": ["strength1", "strength2"],
             "improvements": ["improvement1", "improvement2"],
             "detailed_feedback": "Detailed feedback text"
+            {"," + '''"premium_coaching": "Premium AI coaching insights for interview preparation"''' if is_premium else ""}
         }}
         """
 
         if not self.is_available:
             print('GeminiService.analyze_answer: Gemini unavailable, using fallback')
-            return self.get_fallback_feedback()
+            return self.get_fallback_feedback(is_premium=is_premium)
 
         start = time.time()
         try:
-            text = self._generate_json(prompt, max_output_tokens=1024)
+            text = self._generate_json(prompt, max_output_tokens=2048 if is_premium else 1024)
             elapsed = time.time() - start
             print(f'GeminiService.analyze_answer: got response in {elapsed:.2f}s; text_len={len(text)}')
             if not text:
                 print('GeminiService.analyze_answer: empty text, using fallback')
-                return self.get_fallback_feedback()
+                return self.get_fallback_feedback(is_premium=is_premium)
             feedback = self._parse_json_response(text)
             if not isinstance(feedback, dict):
                 raise ValueError('Gemini returned feedback in an invalid format')
@@ -294,7 +306,7 @@ class GeminiService:
             elapsed = time.time() - start
             print(f'Error analyzing answer ({elapsed:.2f}s): {exc}')
             print(f'Exception details: {type(exc).__name__}: {exc}')
-            return self.get_fallback_feedback()
+            return self.get_fallback_feedback(is_premium=is_premium)
 
     def get_fallback_questions(self, job_role, category, num_questions=5):
         job_key = (job_role or '').lower().replace(' ', '_')
@@ -634,8 +646,8 @@ class GeminiService:
             'detailed_feedback': 'This resume provides a good foundation with clear structure and relevant experience. To improve it further, focus on adding quantifiable achievements, a compelling professional summary, and optimizing for ATS systems by incorporating keywords from job descriptions you are targeting.'
         }
 
-    def get_fallback_feedback(self):
-        return {
+    def get_fallback_feedback(self, is_premium=False):
+        feedback = {
             'content_score': 72,
             'structure_score': 70,
             'clarity_score': 74,
@@ -644,3 +656,8 @@ class GeminiService:
             'improvements': ['Add a few more concrete examples.', 'Be more direct and concise in your answer.'],
             'detailed_feedback': 'Your answer showed useful understanding and a clear direction, but it would be stronger with more specific examples and tighter structure.'
         }
+        
+        if is_premium:
+            feedback['premium_coaching'] = 'Pro Tip: Industry leaders emphasize structured problem-solving approaches. Consider using the STAR method (Situation, Task, Action, Result) to enhance clarity and impact in your responses. Focus on quantifiable results and business impact to stand out.'
+        
+        return feedback
