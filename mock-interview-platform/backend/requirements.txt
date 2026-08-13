@@ -1,20 +1,39 @@
-Flask>=3.1
-Flask-CORS>=5.0
-Flask-SocketIO>=5.5
-Flask-PyMongo>=3.0
-gunicorn>=23.0
-simple-websocket>=1.1
-python-dotenv>=1.1
-PyJWT>=2.10
-bcrypt>=4.3
-google-generativeai>=0.8
-google-genai>=2.17.0
-razorpay>=2.0.1
-dnspython>=2.5.0
+# Web Framework & Server
+Flask==3.1.2
+Flask-CORS==5.0.1
+Flask-SocketIO==5.5.0
+simple-websocket==1.1.0
+gunicorn==23.0.0
 
-# Optional dependencies for resume text extraction
-PyPDF2>=3.0
-python-docx>=1.1
+# Database
+Flask-PyMongo==3.0.2
+PyMongo==4.6.1
+dnspython==2.5.0
 
-# Gemini, OpenCV/MediaPipe, NLTK, TextBlob, and scikit-learn are optional.
+# Environment & Configuration
+python-dotenv==1.1.0
+
+# Authentication & Security
+PyJWT==2.10.1
+bcrypt==4.3.0
+
+# AI & LLM (single Gemini SDK)
+google-genai==2.17.0
+
+# Payments
+razorpay==2.0.1
+
+# Resume Processing (optional but common)
+PyPDF2==3.0.1
+python-docx==1.1.2
+
+# Optional dependencies: OpenCV/MediaPipe, NLTK, TextBlob, scikit-learn
 # The application has built-in fallbacks when they are not installed.
+# Uncomment below if using video analysis:
+# opencv-python==4.8.1.5
+# mediapipe==0.10.14
+
+# Uncomment below if using advanced NLP analysis:
+# nltk==3.8.1
+# textblob==0.17.1
+# scikit-learn==1.3.2

@@ -4,11 +4,13 @@ A full-stack mock interview platform with a Next.js frontend, Flask backend, Mon
 
 ## Tech stack
 
-- Frontend: Next.js 14, React, Tailwind CSS
+- Frontend: Next.js 16.3, React 19, Tailwind CSS
 - Backend: Flask, Flask-SocketIO, PyMongo
-- AI: Google Gemini API
-- Analysis: OpenCV, MediaPipe, TextBlob, NLTK, scikit-learn
-- Database: MongoDB
+- AI: Google Gemini API (google-genai SDK)
+- Analysis: Optional OpenCV, MediaPipe, TextBlob, NLTK, scikit-learn (with local fallbacks)
+- Database: MongoDB Atlas
+- Payments: Razorpay
+- Authentication: JWT
 
 ## Structure
 
