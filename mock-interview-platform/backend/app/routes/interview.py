@@ -120,10 +120,12 @@ def analyze_answer():
         return jsonify({'error': 'Question and answer are required'}), 400
 
     try:
-        # Check subscription limit before analyzing
-        can_proceed, limit_error = subscription_service.check_interview_limit(user_id)
-        if not can_proceed:
-            return jsonify(limit_error), 403
+        if data.get('video_data') and not subscription_service.has_feature(user_id, 'video_analysis'):
+            return jsonify({
+                'error': 'Video analysis is only available on Basic and Pro plans.',
+                'required_tier': 'basic',
+                'message': 'Upgrade your plan to unlock video recording analysis.'
+            }), 403
 
         # Get subscription tier for premium AI coaching
         is_premium = subscription_service.should_use_premium_ai_coaching(user_id)

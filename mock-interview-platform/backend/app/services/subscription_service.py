@@ -66,18 +66,18 @@ class SubscriptionService:
         start_date = user.get('subscription_start_date')
         end_date = user.get('subscription_end_date')
 
-        # Check if subscription has expired
-        if end_date and datetime.utcnow() > end_date:
-            # Auto-downgrade to free
-            self.downgrade_to_free(user_id)
-            return self._free_tier_subscription()
-
-        # Reset monthly usage if needed
+        # Separate billing-cycle reset from subscription expiry handling.
         if self._should_reset_monthly_usage(user):
             self._reset_monthly_usage(user_id)
             interviews_used = 0
+            end_date = user.get('subscription_end_date')
         else:
             interviews_used = user.get('interviews_used_this_month', 0)
+
+        # A paid plan that has expired should be demoted to Free.
+        if end_date and datetime.utcnow() > end_date and tier != 'free':
+            self.downgrade_to_free(user_id)
+            return self._free_tier_subscription()
 
         plan_info = self.config_tiers.get(tier, self.config_tiers['free'])
         monthly_limit = plan_info['monthly_interviews']
@@ -523,10 +523,10 @@ class SubscriptionService:
         }
 
     def _should_reset_monthly_usage(self, user):
-        """Check if monthly usage should be reset."""
+        """Check if monthly usage should be reset for a user plan cycle."""
         end_date = user.get('subscription_end_date')
         if not end_date:
-            return False
+            return True
         return datetime.utcnow() > end_date
 
     def _reset_monthly_usage(self, user_id):

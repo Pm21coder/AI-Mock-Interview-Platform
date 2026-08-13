@@ -1,12 +1,15 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Navigation from '../../../components/Navigation';
 import toast from 'react-hot-toast';
+import { getQuestionCategories } from '../../../utils/api';
 
 export default function InterviewSetup() {
   const router = useRouter();
+  const [availableCategories, setAvailableCategories] = useState(['technical', 'behavioral']);
+  const [loadingCategories, setLoadingCategories] = useState(true);
   const [formData, setFormData] = useState({
     job_role: '',
     category: 'technical',
@@ -14,11 +17,36 @@ export default function InterviewSetup() {
     num_questions: 5,
   });
 
+  useEffect(() => {
+    const fetchCategories = async () => {
+      try {
+        const response = await getQuestionCategories();
+        const categories = response?.available_categories || ['technical', 'behavioral'];
+        setAvailableCategories(categories);
+        if (!categories.includes(formData.category)) {
+          setFormData((prev) => ({ ...prev, category: categories[0] || 'technical' }));
+        }
+      } catch (error) {
+        console.error('Failed to load question categories:', error);
+        setAvailableCategories(['technical', 'behavioral']);
+      } finally {
+        setLoadingCategories(false);
+      }
+    };
+
+    fetchCategories();
+  }, [formData.category]);
+
   const handleSubmit = (e) => {
     e.preventDefault();
 
     if (!formData.job_role) {
       toast.error('Please enter a job role');
+      return;
+    }
+
+    if (!availableCategories.includes(formData.category)) {
+      toast.error('This category is not available on your current plan.');
       return;
     }
 
@@ -60,10 +88,17 @@ export default function InterviewSetup() {
                   value={formData.category}
                   onChange={(e) => setFormData({ ...formData, category: e.target.value })}
                   className="input-field"
+                  disabled={loadingCategories || availableCategories.length === 0}
                 >
-                  <option value="technical">Technical</option>
-                  <option value="behavioral">Behavioral</option>
-                  <option value="general">General</option>
+                  {availableCategories.length === 0 ? (
+                    <option value="technical">Technical</option>
+                  ) : (
+                    availableCategories.map((category) => (
+                      <option key={category} value={category}>
+                        {category.charAt(0).toUpperCase() + category.slice(1)}
+                      </option>
+                    ))
+                  )}
                 </select>
               </div>
 

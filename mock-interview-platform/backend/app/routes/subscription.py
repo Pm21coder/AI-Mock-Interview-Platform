@@ -554,6 +554,7 @@ def submit_email_support():
             return jsonify({'error': 'Subject and message are required'}), 400
 
         # Store support request in database
+        tier = subscription_service.get_user_subscription(user_id)['tier']
         support_request = {
             'user_id': user_id,
             'email': current_user.get('email'),
@@ -561,7 +562,8 @@ def submit_email_support():
             'message': message,
             'timestamp': datetime.utcnow(),
             'status': 'open',
-            'tier': subscription_service.get_user_subscription(user_id)['tier'],
+            'priority': 'high' if tier == 'pro' else 'normal',
+            'tier': tier,
         }
 
         try:

@@ -6,10 +6,12 @@ import os
 
 from app import mongo
 from app.services.gemini_service import GeminiService
+from app.services.subscription_service import SubscriptionService
 from app.utils.auth import token_required
 
 resume_bp = Blueprint('resume', __name__)
 gemini_service = GeminiService()
+subscription_service = SubscriptionService()
 # Keeps guest-mode resume results available for the current backend process
 # when MongoDB cannot be reached during local development.
 demo_resumes = {}
@@ -23,7 +25,18 @@ os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 @token_required
 def upload_resume():
     """Upload a resume file (PDF, DOCX, or TXT) and analyze it with Gemini AI."""
-    
+
+    if not request.current_user or not hasattr(request.current_user, 'get'):
+        return jsonify({'error': 'Authentication required'}), 401
+
+    user_id = str(request.current_user.get('_id', 'guest'))
+    if not subscription_service.has_feature(user_id, 'resume_review'):
+        return jsonify({
+            'error': 'Resume review is only available on the Pro plan.',
+            'required_tier': 'pro',
+            'message': 'Upgrade to Pro to unlock resume analysis.'
+        }), 403
+
     # Check if file is in request
     if 'file' not in request.files:
         return jsonify({'error': 'No file provided'}), 400

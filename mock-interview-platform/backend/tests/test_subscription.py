@@ -15,6 +15,8 @@ from unittest.mock import Mock, patch
 
 import pytest
 
+from app.routes import auth as auth_routes
+
 
 class TestSubscriptionService:
     """Test cases for SubscriptionService."""
@@ -48,6 +50,44 @@ class TestSubscriptionService:
         assert sub['status'] == 'active'
         assert sub['monthly_limit'] == 3
         assert sub['interviews_remaining'] == 3
+
+    def test_free_user_usage_resets_after_billing_cycle(self, subscription_service):
+        """Expired free-tier users should reset their monthly usage instead of being permanently downgraded."""
+        expired_user = {
+            '_id': 'user_free_reset',
+            'email': 'free_reset@example.com',
+            'subscription_tier': 'free',
+            'subscription_status': 'active',
+            'interviews_used_this_month': 3,
+            'subscription_start_date': datetime.utcnow() - timedelta(days=45),
+            'subscription_end_date': datetime.utcnow() - timedelta(days=1),
+        }
+
+        with patch('app.mongo.db.users.find_one', return_value=expired_user), \
+             patch.object(subscription_service, '_reset_monthly_usage') as reset_mock:
+            subscription_service.get_user_subscription('user_free_reset')
+            reset_mock.assert_called_once_with('user_free_reset')
+
+    def test_register_sets_free_tier_cycle_dates(self):
+        """New users should receive a monthly renewal date on registration."""
+        email = 'new_cycle@example.com'
+        auth_routes.local_auth_users.pop(email, None)
+
+        with patch('app.routes.auth._mongo_available', return_value=False), \
+             patch('app.routes.auth.find_user', return_value=None):
+            from app import create_app
+            app = create_app()
+            with app.test_client() as client:
+                response = client.post('/api/auth/register', json={
+                    'email': email,
+                    'password': 'password123',
+                })
+
+        assert response.status_code == 201
+        user = auth_routes.local_auth_users[email]
+        assert user['subscription_tier'] == 'free'
+        assert user['subscription_end_date'] is not None
+        assert user['interviews_used_this_month'] == 0
 
     def test_check_interview_limit_free_tier(self, subscription_service):
         """Test interview limit checking for free tier."""

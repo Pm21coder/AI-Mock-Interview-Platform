@@ -3,6 +3,7 @@ from uuid import uuid4
 
 import bcrypt
 import jwt
+from datetime import timedelta
 from flask import Blueprint, jsonify, request, current_app
 
 from app import mongo
@@ -21,6 +22,9 @@ local_auth_users = {
         'created_at': datetime.utcnow(),
         'subscription_tier': 'free',
         'subscription_status': 'active',
+        'subscription_start_date': datetime.utcnow(),
+        'subscription_end_date': datetime.utcnow() + timedelta(days=30),
+        'interviews_used_this_month': 0,
     }
 }
 
@@ -85,12 +89,16 @@ def register():
     if find_user(email):
         return jsonify({'error': 'User already exists'}), 409
 
+    now = datetime.utcnow()
     user = {
         'email': email,
         'password_hash': bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8'),
-        'created_at': datetime.utcnow(),
+        'created_at': now,
         'subscription_tier': 'free',
         'subscription_status': 'active',
+        'subscription_start_date': now,
+        'subscription_end_date': now + timedelta(days=30),
+        'interviews_used_this_month': 0,
     }
 
     if _mongo_available():

@@ -8,8 +8,8 @@ export default function SubscriptionUsageAlert({ subscription }) {
 
   const { tier, interviews_remaining, monthly_limit, is_trial } = subscription;
 
-  // Don't show alerts for free tier or when unlimited
-  if (tier === 'free' || monthly_limit === 'unlimited') {
+  // Show the usage alert for free tier as well; the upgrade prompt is relevant
+  if (monthly_limit === 'unlimited') {
     return null;
   }
 
