@@ -6,7 +6,7 @@ simple-websocket==1.1.0
 gunicorn==23.0.0
 
 # Database
-Flask-PyMongo==3.0.2
+Flask-PyMongo==3.0.1
 PyMongo==4.6.1
 dnspython==2.5.0
 
