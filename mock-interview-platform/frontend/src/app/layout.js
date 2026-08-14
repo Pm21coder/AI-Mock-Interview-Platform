@@ -4,7 +4,13 @@ import { Toaster } from 'react-hot-toast';
 export const metadata = {
   title: 'AI Mock Interview Platform',
   description: 'Practice your interview skills with AI-powered mock interviews',
-  viewport: 'width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=5',
+};
+
+export const viewport = {
+  width: 'device-width',
+  initialScale: 1,
+  viewportFit: 'cover',
+  maximumScale: 5,
   themeColor: '#2563eb',
 };
 
