@@ -64,12 +64,22 @@ def create_app(config_class=Config):
             with app.app_context():
                 mongo.cx.admin.command('ping')
             app.config['MONGO_AVAILABLE'] = True
+            app.logger.info('✓ MongoDB connection successful')
         except Exception as exc:
             app.config['MONGO_AVAILABLE'] = False
-            app.logger.warning('MongoDB is unavailable after init; starting in guest mode: %s', exc)
+            exc_str = str(exc)
+            if 'timed out' in exc_str.lower() or 'timeout' in exc_str.lower():
+                app.logger.warning(
+                    '⚠ MongoDB SRV connection timeout (DNS/network issue). '
+                    'Running in guest mode. Increase MONGO_CONNECT_TIMEOUT_MS if needed.'
+                )
+            else:
+                app.logger.warning(
+                    '⚠ MongoDB unavailable; starting in guest mode. Error: %s', exc
+                )
     except Exception as exc:
         app.config['MONGO_AVAILABLE'] = False
-        app.logger.warning('MongoDB init failed; starting in guest mode: %s', exc)
+        app.logger.warning('⚠ MongoDB initialization failed; starting in guest mode: %s', exc)
     socketio.init_app(app)
 
     from app.routes.interview import interview_bp
