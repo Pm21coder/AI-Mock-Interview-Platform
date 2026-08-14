@@ -92,8 +92,8 @@ class SubscriptionService:
 
         interviews_remaining = (
             max(0, monthly_limit - interviews_used)
-            if monthly_limit != float('inf')
-            else float('inf')
+            if monthly_limit is not None
+            else 'unlimited'
         )
 
         return {
@@ -101,7 +101,7 @@ class SubscriptionService:
             'status': status,
             'interviews_used_this_month': interviews_used,
             'interviews_remaining': interviews_remaining,
-            'monthly_limit': monthly_limit if monthly_limit != float('inf') else 'unlimited',
+            'monthly_limit': monthly_limit if monthly_limit is not None else 'unlimited',
             'features': plan_info['features'],
             'subscription_start_date': start_date,
             'subscription_end_date': end_date,
@@ -553,8 +553,8 @@ class SubscriptionService:
         interviews_used = fallback_subscription.get('interviews_used_this_month', 0)
         interviews_remaining = (
             max(0, monthly_limit - interviews_used)
-            if monthly_limit != float('inf')
-            else float('inf')
+            if monthly_limit is not None
+            else 'unlimited'
         )
 
         return {
@@ -562,7 +562,7 @@ class SubscriptionService:
             'status': fallback_subscription.get('status', 'active'),
             'interviews_used_this_month': interviews_used,
             'interviews_remaining': interviews_remaining,
-            'monthly_limit': monthly_limit if monthly_limit != float('inf') else 'unlimited',
+            'monthly_limit': monthly_limit if monthly_limit is not None else 'unlimited',
             'features': plan_info['features'],
             'subscription_start_date': fallback_subscription.get('subscription_start_date'),
             'subscription_end_date': end_date,

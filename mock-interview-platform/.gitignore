@@ -12,6 +12,7 @@ backend/**/*.pyc
 backend/.env
 backend/.mongodb-data
 backend/mongodb.log
+backend/uploads/  # User-uploaded resumes and personal data
 
 # OS
 .DS_Store

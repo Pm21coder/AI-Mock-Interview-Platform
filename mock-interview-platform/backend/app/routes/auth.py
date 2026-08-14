@@ -66,8 +66,13 @@ def find_user(email):
 
 
 def create_token(user):
+    from datetime import datetime, timedelta
     token = jwt.encode(
-        {'user_id': str(user['_id']), 'email': user['email']},
+        {
+            'user_id': str(user['_id']),
+            'email': user['email'],
+            'exp': datetime.utcnow() + timedelta(days=30)
+        },
         Config.JWT_SECRET_KEY,
         algorithm='HS256',
     )

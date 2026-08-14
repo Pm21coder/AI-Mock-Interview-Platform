@@ -288,7 +288,7 @@ class GeminiService:
 
         if not self.is_available:
             print('GeminiService.analyze_answer: Gemini unavailable, using fallback')
-            return self.get_fallback_feedback(is_premium=is_premium)
+            return self.get_fallback_feedback(is_premium=is_premium, user_answer=user_answer, expected_answer=expected_answer)
 
         start = time.time()
         try:
@@ -297,7 +297,7 @@ class GeminiService:
             print(f'GeminiService.analyze_answer: got response in {elapsed:.2f}s; text_len={len(text)}')
             if not text:
                 print('GeminiService.analyze_answer: empty text, using fallback')
-                return self.get_fallback_feedback(is_premium=is_premium)
+                return self.get_fallback_feedback(is_premium=is_premium, user_answer=user_answer, expected_answer=expected_answer)
             feedback = self._parse_json_response(text)
             if not isinstance(feedback, dict):
                 raise ValueError('Gemini returned feedback in an invalid format')
@@ -306,7 +306,7 @@ class GeminiService:
             elapsed = time.time() - start
             print(f'Error analyzing answer ({elapsed:.2f}s): {exc}')
             print(f'Exception details: {type(exc).__name__}: {exc}')
-            return self.get_fallback_feedback(is_premium=is_premium)
+            return self.get_fallback_feedback(is_premium=is_premium, user_answer=user_answer, expected_answer=expected_answer)
 
     def get_fallback_questions(self, job_role, category, num_questions=5):
         job_key = (job_role or '').lower().replace(' ', '_')
@@ -659,18 +659,131 @@ class GeminiService:
             'detailed_feedback': 'This resume provides a good foundation with clear structure and relevant experience. To improve it further, focus on adding quantifiable achievements, a compelling professional summary, and optimizing for ATS systems by incorporating keywords from job descriptions you are targeting.'
         }
 
-    def get_fallback_feedback(self, is_premium=False):
+    def get_fallback_feedback(self, is_premium=False, user_answer='', expected_answer=''):
+        """
+        Provide fallback feedback when Gemini is unavailable.
+        
+        This generates responsive scores based on the actual answer content,
+        not fixed hardcoded values. It's honest about being heuristic feedback
+        rather than full AI analysis.
+        
+        Args:
+            is_premium: Whether user is on premium tier (adds coaching)
+            user_answer: The user's actual answer text for analysis
+            expected_answer: The expected answer for comparison (optional)
+        """
+        # Compute responsive scores based on answer quality
+        answer_word_count = len((user_answer or '').split())
+        answer_length = len((user_answer or '').strip())
+        
+        # Base scores
+        content_score = 50  # Start with 50, adjust based on content
+        structure_score = 50
+        clarity_score = 50
+        
+        # Adjust based on word count (bare minimum feedback)
+        if answer_word_count < 10:
+            content_score = max(30, content_score - 20)
+            structure_score = max(30, structure_score - 25)
+            clarity_score = max(35, clarity_score - 15)
+        elif answer_word_count > 50:
+            content_score = min(95, content_score + 25)
+            structure_score = min(85, structure_score + 20)
+            clarity_score = min(90, clarity_score + 20)
+        elif answer_word_count > 20:
+            content_score = min(85, content_score + 15)
+            structure_score = min(80, structure_score + 15)
+            clarity_score = min(85, clarity_score + 15)
+        
+        # Check for specificity (examples, numbers, industry terms)
+        has_examples = any(
+            keyword in (user_answer or '').lower()
+            for keyword in ['example', 'for instance', 'such as', 'like', 'specifically']
+        )
+        has_numbers = any(char.isdigit() for char in (user_answer or ''))
+        has_specifics = has_examples or has_numbers
+        
+        if has_specifics:
+            content_score = min(95, content_score + 10)
+        else:
+            content_score = max(40, content_score - 5)
+        
+        # Check for common grammatical issues (simple heuristic)
+        answer_lower = (user_answer or '').lower()
+        grammar_issues = 0
+        if '  ' in answer_lower:  # Double spaces
+            grammar_issues += 1
+        
+        clarity_score = max(40, clarity_score - (grammar_issues * 5))
+        
+        # Compute overall (average with slight weight toward content)
+        overall_score = int((content_score * 0.4 + structure_score * 0.3 + clarity_score * 0.3))
+        overall_score = max(30, min(95, overall_score))  # Clamp to 30-95
+        
+        # Generate responsive feedback
+        strengths = []
+        improvements = []
+        detailed_feedback = ''
+        
+        # Strengths
+        if answer_word_count > 15:
+            strengths.append('Your answer demonstrates substantive thinking.')
+        if has_examples:
+            strengths.append('Good use of specific examples or details.')
+        if clarity_score >= 70:
+            strengths.append('Clear and well-articulated response.')
+        if content_score >= 70:
+            strengths.append('Strong content with relevant points.')
+        
+        if not strengths:
+            strengths.append('You attempted to answer the question.')
+        
+        # Improvements
+        if answer_word_count < 15:
+            improvements.append('Provide more detail or elaboration in your answer.')
+        if not has_specifics:
+            improvements.append('Consider including concrete examples or specific metrics.')
+        if structure_score < 60:
+            improvements.append('Organize your answer with a clearer structure.')
+        if clarity_score < 60:
+            improvements.append('Focus on clarity and conciseness in your explanation.')
+        
+        if not improvements:
+            improvements.append('Continue refining your answers with practice.')
+        
+        # Detailed feedback
+        if overall_score >= 70:
+            detailed_feedback = (
+                f'Your answer ({answer_word_count} words) shows good understanding. '
+                'Continue practicing to refine your responses and add more specific examples for stronger impact.'
+            )
+        elif overall_score >= 50:
+            detailed_feedback = (
+                f'Your answer ({answer_word_count} words) addresses the question. '
+                'To improve, add more specific examples, industry terms, and a clearer structure.'
+            )
+        else:
+            detailed_feedback = (
+                f'Your answer ({answer_word_count} words) is brief. '
+                'Develop more comprehensive responses with specific details and clear organization to better demonstrate your knowledge.'
+            )
+        
         feedback = {
-            'content_score': 72,
-            'structure_score': 70,
-            'clarity_score': 74,
-            'overall_score': 72,
-            'strengths': ['Good structure and effort.', 'Relevant points are included.'],
-            'improvements': ['Add a few more concrete examples.', 'Be more direct and concise in your answer.'],
-            'detailed_feedback': 'Your answer showed useful understanding and a clear direction, but it would be stronger with more specific examples and tighter structure.'
+            'content_score': content_score,
+            'structure_score': structure_score,
+            'clarity_score': clarity_score,
+            'overall_score': overall_score,
+            'strengths': strengths,
+            'improvements': improvements,
+            'detailed_feedback': detailed_feedback,
+            '_feedback_type': 'heuristic'  # Indicate this is fallback, not AI-generated
         }
         
         if is_premium:
-            feedback['premium_coaching'] = 'Pro Tip: Industry leaders emphasize structured problem-solving approaches. Consider using the STAR method (Situation, Task, Action, Result) to enhance clarity and impact in your responses. Focus on quantifiable results and business impact to stand out.'
+            feedback['premium_coaching'] = (
+                'Coaching Tip: Structured answers are more impactful. '
+                'Try using frameworks like STAR (Situation, Task, Action, Result) for behavioral questions, '
+                'or breaking technical questions into problem, approach, and implementation.'
+            )
         
         return feedback

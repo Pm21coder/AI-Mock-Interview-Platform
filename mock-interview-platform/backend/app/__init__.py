@@ -9,9 +9,48 @@ mongo = PyMongo()
 socketio = SocketIO(cors_allowed_origins='*')
 
 
+def _check_secret_keys(app):
+    """
+    Validate that secret keys are not public defaults in production.
+    
+    Allows defaults in debug/development mode for zero-config local setup,
+    but prevents accidentally running production with exposed secrets.
+    """
+    is_debug = app.config.get('FLASK_DEBUG', False)
+    default_secret = 'your-secret-key-change-in-production'
+    
+    secret_key = app.config.get('SECRET_KEY', '')
+    jwt_secret_key = app.config.get('JWT_SECRET_KEY', '')
+    
+    has_default_secret = secret_key == default_secret
+    has_default_jwt = jwt_secret_key == default_secret
+    
+    if (has_default_secret or has_default_jwt) and not is_debug:
+        error_msg = (
+            'SECURITY ERROR: Cannot start application in production mode with default secret keys.\n'
+            'The SECRET_KEY and JWT_SECRET_KEY environment variables are still set to public defaults.\n'
+            'Please set these to real, unique secrets before deploying:\n'
+            '  export SECRET_KEY="<random-secret>"\n'
+            '  export JWT_SECRET_KEY="<random-secret>"\n'
+            'Or set FLASK_DEBUG=false to acknowledge production mode.'
+        )
+        app.logger.error(error_msg)
+        raise RuntimeError(error_msg)
+    
+    if (has_default_secret or has_default_jwt) and is_debug:
+        app.logger.warning(
+            'Debug mode is active: using default secret keys. '
+            'This is intentional for local development. '
+            'In production, set real SECRET_KEY and JWT_SECRET_KEY environment variables.'
+        )
+
+
 def create_app(config_class=Config):
     app = Flask(__name__)
     app.config.from_object(config_class)
+
+    # Security check: ensure secret keys are not public defaults in production
+    _check_secret_keys(app)
 
     CORS(app)
     # A remote MongoDB SRV record can be temporarily unavailable during local

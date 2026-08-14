@@ -109,7 +109,7 @@ class Config:
         'pro': {
             'name': 'Pro',
             'price': 10,
-            'monthly_interviews': float('inf'),  # Unlimited
+            'monthly_interviews': None,  # None = unlimited
             'feedback_history_days': None,  # Unlimited history
             'question_categories': 'all',  # All categories available
             'features': {

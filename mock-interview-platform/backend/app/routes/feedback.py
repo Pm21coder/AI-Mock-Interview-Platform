@@ -1,13 +1,7 @@
-from flask import Blueprint, jsonify
+# This feedback blueprint has been removed.
+# Feedback is now handled exclusively through the interview routes.
+# Legacy stub route with hardcoded data has been deleted to avoid confusion.
+from flask import Blueprint
 
 feedback_bp = Blueprint('feedback', __name__)
-
-
-@feedback_bp.route('/summary', methods=['GET'])
-def summary():
-    return jsonify({
-        'summary': 'Interview feedback is ready.',
-        'overall_score': 82,
-        'key_strengths': ['Clear communication', 'Technical depth'],
-        'areas_to_improve': ['Be more concise', 'Add more examples'],
-    })
+# No routes defined - use /api/interview/feedback-summary or /api/interview/analyze-answer instead

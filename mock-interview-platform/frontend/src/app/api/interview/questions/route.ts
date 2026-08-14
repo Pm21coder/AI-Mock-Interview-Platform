@@ -1,53 +1,36 @@
-import { GoogleGenAI, Type } from "@google/genai";
+/**
+ * ⚠️ DEPRECATED - This API route is dead code and should not be used
+ *
+ * This was an early reference implementation for calling Gemini directly from the frontend.
+ * The live application uses the Flask backend instead.
+ *
+ * LIVE IMPLEMENTATION:
+ * - POST /api/interview/generate-questions (via Flask backend at NEXT_PUBLIC_API_URL)
+ * - Backend handles Gemini integration, authentication, usage tracking
+ * - Questions are persisted to MongoDB with interview session metadata
+ *
+ * DEAD CODE:
+ * - This route exposes GEMINI_API_KEY to the browser (security risk)
+ * - No rate limiting or usage enforcement
+ * - No data persistence
+ * - Not integrated with subscription system
+ *
+ * Do NOT use this route. It is kept here temporarily for reference during cleanup.
+ * TODO: Delete frontend/src/app/api/interview/ directory entirely
+ */
+
 import { NextRequest, NextResponse } from "next/server";
 
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-
 export async function POST(req: NextRequest) {
-  if (!process.env.GEMINI_API_KEY) {
-    return NextResponse.json(
-      { error: "Server misconfigured: missing GEMINI_API_KEY" },
-      { status: 500 }
-    );
-  }
-
-  try {
-    const { role, category, difficulty } = await req.json();
-    
-    if (!role || !category || !difficulty) {
-      return NextResponse.json(
-        { error: "role, category, and difficulty are required" },
-        { status: 400 }
-      );
-    }
-
-    const response = await ai.models.generateContent({
-      model: "gemini-flash-latest",
-      contents: `Generate 5 ${difficulty} ${category} interview questions for a ${role} candidate.`,
-      config: {
-        responseMimeType: "application/json",
-        responseJsonSchema: {
-          type: Type.OBJECT,
-          properties: {
-            questions: {
-              type: Type.ARRAY,
-              items: {
-                type: Type.OBJECT,
-                properties: {
-                  id: { type: Type.INTEGER },
-                  question: { type: Type.STRING },
-                  category: { type: Type.STRING },
-                },
-                propertyOrdering: ["id", "question", "category"],
-              },
-            },
-          },
-          propertyOrdering: ["questions"],
-        },
-      },
-    });
-
-    if (response.candidates?.[0]?.finishReason === "SAFETY") {
+  return NextResponse.json(
+    {
+      error: "DEPRECATED: This API route is dead code. Use the Flask backend instead.",
+      details: "POST /api/interview/generate-questions via NEXT_PUBLIC_API_URL",
+      see: "backend/app/routes/interview.py for the real implementation"
+    },
+    { status: 410 } // 410 Gone - resource no longer available
+  );
+}
       return NextResponse.json(
         { error: "Blocked by safety filters — try a different role/category" },
         { status: 422 }

@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useState, useCallback } from 'react';
 import { useSyncExternalStore } from 'react';
 import { useRouter } from 'next/navigation';
+import { disconnectSocket } from '../utils/socket';
 
 // Custom store that tracks auth state changes both across tabs (via the
 // 'storage' event) and within the same tab (via a custom 'auth-change' event).
@@ -34,6 +35,9 @@ export default function Navigation() {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
 
   const signOut = useCallback(() => {
+    // Disconnect Socket.IO connection to avoid receiving old user's broadcasts
+    disconnectSocket();
+    
     window.localStorage.removeItem('auth_token');
     window.localStorage.removeItem('auth_email');
     window.dispatchEvent(new Event('auth-change'));

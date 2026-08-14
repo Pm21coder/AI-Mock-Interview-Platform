@@ -1,53 +1,37 @@
-import { useState } from 'react';
-import { useInterview } from '../hooks/useInterview';
+/**
+ * ⚠️ DEPRECATED - This component is dead code and should not be used
+ *
+ * This was a reference implementation for direct Gemini integration from the frontend.
+ * However, the live application uses a different architecture:
+ *
+ * LIVE ARCHITECTURE:
+ * - Frontend communicates with Flask backend at /api/interview/*
+ * - Backend handles Gemini API integration, authentication, and data persistence
+ * - Socket.IO broadcasts dashboard updates to connected clients
+ * - Interview sessions are stored in MongoDB with full audit trail
+ *
+ * DEAD CODE ARCHITECTURE (this file):
+ * - Frontend calls Gemini API directly from browser
+ * - This approach was abandoned because:
+ *   1. Exposes API keys to the browser (security risk)
+ *   2. No server-side rate limiting or usage tracking
+ *   3. Can't persist data across sessions
+ *   4. Doesn't integrate with subscription tiers
+ *   5. No audit trail for compliance
+ *
+ * This file is kept for reference only. Do not import or use it.
+ *
+ * For the actual interview implementation, see:
+ * - frontend/src/app/interview/session/page.js (live interview page)
+ * - backend/app/routes/interview.py (backend interview logic)
+ *
+ * TODO: Delete this file and useInterview.js, and the orphaned Next.js API routes
+ * in frontend/src/app/api/interview/ as part of code cleanup.
+ */
 
-export default function InterviewSession() {
-  const { error, loading, questions, feedback, startInterview, submitForFeedback, clearError } = useInterview();
-  const [qaPairs, setQAPairs] = useState([]);
-  const [role, setRole] = useState('Software Engineer');
-  const [category, setCategory] = useState('Technical');
-  const [difficulty, setDifficulty] = useState('Medium');
-  const [sessionStarted, setSessionStarted] = useState(false);
-
-  const handleStartInterview = async (e) => {
-    e.preventDefault();
-    clearError();
-    const result = await startInterview({ role, category, difficulty });
-    if (result) {
-      setSessionStarted(true);
-      setQAPairs(result.map((q) => ({ question: q.question, answer: '' })));
-    }
-  };
-
-  const handleAnswerChange = (index, answer) => {
-    const updated = [...qaPairs];
-    updated[index].answer = answer;
-    setQAPairs(updated);
-  };
-
-  const handleSubmitForFeedback = async () => {
-    clearError();
-    const result = await submitForFeedback(role, qaPairs);
-    if (result) {
-      // Feedback is now available in the feedback state
-      console.log('Feedback received:', result);
-    }
-  };
-
-  return (
-    <div className="max-w-4xl mx-auto p-4">
-      {/* Error Display */}
-      {error && (
-        <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg">
-          <p className="text-red-700 font-semibold">Error</p>
-          <p className="text-red-600">{error}</p>
-          <button
-            onClick={clearError}
-            className="mt-2 px-3 py-1 bg-red-100 hover:bg-red-200 rounded text-sm text-red-700"
-          >
-            Dismiss
-          </button>
-        </div>
+export default function InterviewSessionExample() {
+  throw new Error('InterviewSessionExample is deprecated dead code - use /interview/session/page.js instead');
+}
       )}
 
       {/* Interview Setup Form */}

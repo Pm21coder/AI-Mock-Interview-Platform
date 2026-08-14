@@ -1,23 +1,37 @@
-import { GoogleGenAI, Type } from "@google/genai";
+/**
+ * ⚠️ DEPRECATED - This API route is dead code and should not be used
+ *
+ * This was an early reference implementation for calling Gemini directly from the frontend.
+ * The live application uses the Flask backend instead.
+ *
+ * LIVE IMPLEMENTATION:
+ * - POST /api/interview/analyze-answer (via Flask backend at NEXT_PUBLIC_API_URL)
+ * - Backend handles Gemini integration, NLP analysis, CV analysis, feedback generation
+ * - Responses are persisted to MongoDB with interview metadata
+ *
+ * DEAD CODE:
+ * - This route exposes GEMINI_API_KEY to the browser (security risk)
+ * - No rate limiting or usage enforcement
+ * - No data persistence
+ * - No integration with subscription/billing system
+ * - No CV/expression analysis (only Gemini feedback)
+ *
+ * Do NOT use this route. It is kept here temporarily for reference during cleanup.
+ * TODO: Delete frontend/src/app/api/interview/ directory entirely
+ */
+
 import { NextRequest, NextResponse } from "next/server";
 
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-
 export async function POST(req: NextRequest) {
-  if (!process.env.GEMINI_API_KEY) {
-    return NextResponse.json(
-      { error: "Server misconfigured: missing GEMINI_API_KEY" },
-      { status: 500 }
-    );
-  }
-
-  try {
-    const { role, qaPairs } = await req.json();
-
-    if (!Array.isArray(qaPairs) || qaPairs.length === 0) {
-      return NextResponse.json(
-        { error: "qaPairs must be a non-empty array" },
-        { status: 400 }
+  return NextResponse.json(
+    {
+      error: "DEPRECATED: This API route is dead code. Use the Flask backend instead.",
+      details: "POST /api/interview/analyze-answer via NEXT_PUBLIC_API_URL",
+      see: "backend/app/routes/interview.py for the real implementation"
+    },
+    { status: 410 } // 410 Gone - resource no longer available
+  );
+}
       );
     }
 
