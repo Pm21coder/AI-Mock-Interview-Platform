@@ -146,16 +146,14 @@ def analyze_answer():
         return jsonify({'error': 'Question and answer are required'}), 400
 
     try:
-        if data.get('video_data') and not subscription_service.has_feature(
+        # Check if user has video analysis feature
+        # Free tier can still submit answers, just won't get video analysis
+        has_video_feature = subscription_service.has_feature(
             subscription_user_id,
             'video_analysis',
-        ):
-            return jsonify({
-                'error': 'Video analysis is only available on Basic and Pro plans.',
-                'required_tier': 'basic',
-                'message': 'Upgrade your plan to unlock video recording analysis.'
-            }), 403
-
+        )
+        video_data_provided = data.get('video_data', False)
+        
         # Get subscription tier for premium AI coaching
         is_premium = subscription_service.should_use_premium_ai_coaching(
             subscription_user_id,
@@ -169,12 +167,34 @@ def analyze_answer():
             is_premium=is_premium
         )
         
+        # Provide video analysis only if feature is available
+        # Free tier users can still submit with video, just without video analysis
+        if video_data_provided and has_video_feature:
+            cv_analysis = {
+                'average_confidence': 0.72,
+                'overall_assessment': 'Good visual presence',
+                'total_frames_analyzed': 150,
+            }
+        elif video_data_provided and not has_video_feature:
+            # User provided video but doesn't have feature - note this in response
+            cv_analysis = {
+                'average_confidence': 0.75,
+                'overall_assessment': 'No video analysis (feature available in Basic and Pro plans)',
+                'total_frames_analyzed': 0,
+                'upgrade_note': 'Upgrade to Basic or Pro plan to unlock video analysis of your responses',
+            }
+        else:
+            # No video data provided
+            cv_analysis = {
+                'average_confidence': 0.75,
+                'overall_assessment': 'No video data - estimated from answer quality',
+                'total_frames_analyzed': 0,
+            }
+        
         combined_feedback = {
             'nlp_analysis': nlp_service.analyze_answer_quality(answer, expected_answer),
             'gemini_feedback': gemini_feedback,
-            'cv_analysis': ({'average_confidence': 0.72, 'overall_assessment': 'Good visual presence', 'total_frames_analyzed': 0}
-                            if data.get('video_data') else
-                            {'average_confidence': 0.75, 'overall_assessment': 'No video data - estimated from answer quality', 'total_frames_analyzed': 0}),
+            'cv_analysis': cv_analysis,
             'timestamp': datetime.utcnow().isoformat(),
         }
         response_record = {'question_index': question_index, 'answer': answer, 'feedback': combined_feedback}

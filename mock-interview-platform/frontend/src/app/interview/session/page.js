@@ -416,7 +416,15 @@ function InterviewSessionContent() {
       };
 
       setFeedback(enrichedFeedback);
-      toast.success('Answer and Camera Vision Analysis complete!');
+      
+      // Check if video was provided but not analyzed (free tier)
+      const upgradeNote = result.cv_analysis?.upgrade_note;
+      if (upgradeNote) {
+        toast.success('Answer analyzed! (Video analysis available in paid plans)');
+        toast.info(upgradeNote, { duration: 6000 });
+      } else {
+        toast.success('Answer and Camera Vision Analysis complete!');
+      }
       setLoadError('');
     } catch (error) {
       const errorMessage = error.response?.data?.error || error.message || 'Failed to analyze answer';
