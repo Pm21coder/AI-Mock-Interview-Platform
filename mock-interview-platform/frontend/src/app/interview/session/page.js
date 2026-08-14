@@ -421,7 +421,7 @@ function InterviewSessionContent() {
       const upgradeNote = result.cv_analysis?.upgrade_note;
       if (upgradeNote) {
         toast.success('Answer analyzed! (Video analysis available in paid plans)');
-        toast.info(upgradeNote, { duration: 6000 });
+        toast(upgradeNote, { duration: 6000 });
       } else {
         toast.success('Answer and Camera Vision Analysis complete!');
       }
