@@ -21,6 +21,7 @@ export default function RootLayout({ children }) {
   return (
     <html lang="en" data-scroll-behavior="smooth">
       <head>
+        <script id="Cookiebot" src="https://consent.cookiebot.com/uc.js" data-cbid="14c3d677-3235-4db8-a6ac-71c42d55f64c" type="text/javascript" async></script>
         <script async src="https://www.googletagmanager.com/gtag/js?id=G-NDXBR2Z82J" />
         <script dangerouslySetInnerHTML={{
           __html: `
