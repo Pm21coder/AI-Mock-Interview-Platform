@@ -4,6 +4,9 @@ import { Toaster } from 'react-hot-toast';
 export const metadata = {
   title: 'AI Mock Interview Platform',
   description: 'Practice your interview skills with AI-powered mock interviews',
+  verification: {
+    google: 'KTVw_NsHR-ZL_LW6TbOsBSlnlz-DyUoe5p-TcFEhZck',
+  },
 };
 
 export const viewport = {
@@ -19,7 +22,6 @@ export default function RootLayout({ children }) {
     <html lang="en" data-scroll-behavior="smooth">
       <head>
         <meta charSet="utf-8" />
-        <meta name="google-site-verification" content="KTVw_NsHR-ZL_LW6TbOsBSlnlz-DyUoe5p-TcFEhZck" />
         <meta name="apple-mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
       </head>
