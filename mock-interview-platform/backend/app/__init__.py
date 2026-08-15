@@ -4,11 +4,13 @@ from flask import Flask
 from flask_cors import CORS
 from flask_pymongo import PyMongo
 from flask_socketio import SocketIO
+from flask_compress import Compress
 
 from app.config import Config
 
 mongo = PyMongo()
 socketio = SocketIO(cors_allowed_origins='*')
+compress = Compress()
 
 
 def _fallback_local_mongo_uri():
@@ -98,6 +100,7 @@ def create_app(config_class=Config):
         else:
             app.logger.warning('⚠ MongoDB unavailable; starting in guest mode.')
     socketio.init_app(app)
+    compress.init_app(app)  # Enable gzip compression for all responses
 
     from app.routes.interview import interview_bp
     from app.routes.feedback import feedback_bp

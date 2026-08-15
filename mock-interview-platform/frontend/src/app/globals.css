@@ -99,6 +99,62 @@
     isolation: isolate;
   }
 
+  /* Mobile-first responsive utilities */
+  .responsive-container {
+    @apply w-full px-3 xs:px-4 sm:px-6 lg:px-8;
+  }
+
+  .responsive-text {
+    @apply text-sm sm:text-base md:text-lg;
+  }
+
+  .responsive-heading {
+    @apply text-2xl sm:text-3xl md:text-4xl lg:text-5xl;
+  }
+
+  /* Touch target sizing (48px minimum) */
+  .touch-target {
+    @apply min-h-[48px] min-w-[48px] flex items-center justify-center;
+  }
+
+  .btn-touch {
+    @apply py-3 px-4 min-h-[48px] touch-target;
+  }
+
+  /* Optimize for mobile screens */
+  @media (max-width: 640px) {
+    .hide-mobile {
+      @apply hidden;
+    }
+
+    .text-responsive {
+      font-size: clamp(0.875rem, 2.5vw, 1.125rem);
+    }
+  }
+
+  /* Print optimization */
+  @media print {
+    body {
+      background: white;
+    }
+
+    .no-print {
+      @apply hidden;
+    }
+  }
+
+  /* Reduced motion support */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+
   .page-shell::before {
     content: '';
     position: absolute;

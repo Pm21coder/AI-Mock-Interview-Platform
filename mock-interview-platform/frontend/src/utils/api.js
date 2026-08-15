@@ -1,5 +1,36 @@
 import axios from 'axios';
 
+// Simple in-memory cache with TTL for reducing duplicate API calls
+const apiCache = new Map();
+const CACHE_TTL = {
+  questionCategories: 5 * 60 * 1000, // 5 minutes
+  dashboardStats: 60 * 1000, // 1 minute
+  features: 5 * 60 * 1000, // 5 minutes
+  default: 2 * 60 * 1000, // 2 minutes
+};
+
+function getCacheKey(method, url, params) {
+  const paramStr = params ? JSON.stringify(params) : '';
+  return `${method}:${url}:${paramStr}`;
+}
+
+function getCachedData(key) {
+  const cached = apiCache.get(key);
+  if (cached && Date.now() - cached.timestamp < cached.ttl) {
+    return cached.data;
+  }
+  apiCache.delete(key);
+  return null;
+}
+
+function setCachedData(key, data, ttl = CACHE_TTL.default) {
+  apiCache.set(key, {
+    data,
+    timestamp: Date.now(),
+    ttl,
+  });
+}
+
 const api = axios.create({
   baseURL: process.env.NEXT_PUBLIC_API_URL || '',
   headers: {
@@ -287,12 +318,22 @@ export const generateFeedback = async (role, qaPairs) => {
 
 // New subscription features API
 export const getQuestionCategories = async () => {
+  const cacheKey = getCacheKey('GET', '/api/subscription/question-categories');
+  const cached = getCachedData(cacheKey);
+  if (cached) return cached;
+
   const response = await api.get('/api/subscription/question-categories');
+  setCachedData(cacheKey, response.data, CACHE_TTL.questionCategories);
   return response.data;
 };
 
 export const getAdvancedAnalytics = async () => {
+  const cacheKey = getCacheKey('GET', '/api/subscription/analytics');
+  const cached = getCachedData(cacheKey);
+  if (cached) return cached;
+
   const response = await api.get('/api/subscription/analytics');
+  setCachedData(cacheKey, response.data, CACHE_TTL.features);
   return response.data;
 };
 
@@ -305,11 +346,21 @@ export const submitEmailSupport = async (subject, message) => {
 };
 
 export const getPlanComparison = async () => {
+  const cacheKey = getCacheKey('GET', '/api/subscription/plan-comparison');
+  const cached = getCachedData(cacheKey);
+  if (cached) return cached;
+
   const response = await api.get('/api/subscription/plan-comparison');
+  setCachedData(cacheKey, response.data, CACHE_TTL.features);
   return response.data;
 };
 
 export const getFeedbackHistoryLimit = async () => {
+  const cacheKey = getCacheKey('GET', '/api/subscription/feedback-history-limit');
+  const cached = getCachedData(cacheKey);
+  if (cached) return cached;
+
   const response = await api.get('/api/subscription/feedback-history-limit');
+  setCachedData(cacheKey, response.data, CACHE_TTL.features);
   return response.data;
 };

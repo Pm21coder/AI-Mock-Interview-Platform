@@ -14,6 +14,7 @@ from app.services.subscription_service import SubscriptionService
 from app.socket_events import emit_dashboard_update
 from app.utils.auth import token_required
 from app.utils.time import utc_now
+from app.cache_utils import optimize_response
 
 logger = logging.getLogger(__name__)
 
@@ -322,14 +323,16 @@ def get_dashboard_stats():
         if stats is None or stats.history_synced_at is None:
             stats = dashboard_service.rebuild_from_interviews(user_id)
 
-        response = jsonify({
+        response_data = {
             'stats': {
                 'interviews_completed': stats.interviews_completed,
                 'average_score': stats.average_score,
                 'confidence_score': stats.confidence_score
             },
             'recent_interviews': stats.recent_interviews
-        })
+        }
+        
+        response = jsonify(optimize_response(response_data))
         # Prevent intermediate caches from serving stale, sensitive dashboard statistics
         response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
         response.headers['Pragma'] = 'no-cache'

@@ -53,7 +53,7 @@ class GeminiService:
         return ordered
 
     def __init__(self):
-        api_key = Config.GOOGLE_GEMINI_API_KEY
+        api_key = (Config.GOOGLE_GEMINI_API_KEY or '').strip()
         self.model_name = self.normalize_model_name(Config.GOOGLE_GEMINI_MODEL)
         self.model_candidates_list = self.model_candidates(self.model_name)
         self.use_new_sdk = False
@@ -109,7 +109,7 @@ class GeminiService:
         for model_name in self.model_candidates_list:
             try:
                 if self.use_new_sdk and self.client:
-                    # Use new google.genai SDK
+                    # Use new google.genai SDK with timeout
                     response = self.client.models.generate_content(
                         model=f'models/{model_name}',
                         contents=prompt,
@@ -118,6 +118,7 @@ class GeminiService:
                             max_output_tokens=max_output_tokens,
                             temperature=0.3,
                         ),
+                        request_options={'timeout': Config.GEMINI_TIMEOUT_SECONDS},
                     )
                     text = self._extract_response_text_new_sdk(response)
                 else:

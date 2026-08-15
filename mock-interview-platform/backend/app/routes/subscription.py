@@ -11,6 +11,7 @@ from app.config import Config
 from app.services.subscription_service import SubscriptionService, fallback_subscriptions
 from app.utils.auth import token_required
 from app.utils.time import utc_now
+from app.cache_utils import cache_response, optimize_response
 
 subscription_bp = Blueprint('subscription', __name__)
 subscription_service = SubscriptionService()
@@ -475,13 +476,15 @@ def get_question_categories():
         categories = subscription_service.get_available_question_categories(user_id)
         sub = subscription_service.get_user_subscription(user_id)
         
-        return jsonify({
+        response = {
             'available_categories': categories,
             'tier': sub['tier'],
             'interviews_remaining': sub['interviews_remaining'],
             'monthly_limit': sub['monthly_limit'],
             'all_categories_available': categories == ['technical', 'behavioral', 'situational', 'system_design']
-        }), 200
+        }
+        
+        return jsonify(optimize_response(response)), 200
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 

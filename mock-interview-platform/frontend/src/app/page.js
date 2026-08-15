@@ -1,7 +1,8 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useEffect, lazy, Suspense } from 'react';
 import Link from 'next/link';
+import Image from 'next/image';
 import Navigation from '../components/Navigation';
 
 const stats = [
@@ -94,9 +95,13 @@ export default function Home() {
 
                   <div className="grid gap-4 md:grid-cols-[1.2fr_0.8fr]">
                     <div className="relative overflow-hidden rounded-[1.5rem] border border-white/10 bg-slate-900 p-3">
-                      <img
+                      <Image
                         src="https://images.unsplash.com/photo-1522202176988-66273c2fd55f?auto=format&fit=crop&w=900&q=80"
                         alt="Interview coaching session"
+                        width={400}
+                        height={260}
+                        priority={false}
+                        loading="lazy"
                         className="h-[260px] w-full rounded-[1.2rem] object-cover"
                       />
                       <div className="absolute inset-0 bg-gradient-to-tr from-blue-600/35 via-indigo-500/10 to-transparent" />

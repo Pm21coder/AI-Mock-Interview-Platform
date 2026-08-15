@@ -99,7 +99,7 @@ export default function DashboardPage() {
     }
 
     const initialFetch = setTimeout(fetchDashboardData, 0);
-    const interval = setInterval(fetchDashboardData, 30000);
+    const interval = setInterval(fetchDashboardData, 60000); // Changed from 30s to 60s for better performance
 
     const handleDashboardUpdate = (data) => {
       console.debug('Received dashboard_update socket payload:', data);
