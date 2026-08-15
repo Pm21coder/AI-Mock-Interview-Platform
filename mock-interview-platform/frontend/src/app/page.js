@@ -196,11 +196,11 @@ export default function Home() {
         </section>
 
         <section className="py-8 sm:py-10 lg:py-16">
-          <div className="rounded-[2rem] border border-blue-100 bg-gradient-to-br from-blue-50 via-white to-violet-50 p-6 shadow-soft sm:p-8 lg:p-12">
+          <div className="rounded-[2rem] border border-blue-100 section-light-bg p-6 shadow-soft sm:p-8 lg:p-12 dark:border-slate-700">
             <div className="grid gap-6 lg:grid-cols-[1.1fr_0.9fr] lg:items-center">
               <div>
-                <p className="text-sm font-semibold uppercase tracking-[0.18em] text-blue-600">Why choose us</p>
-                <h2 className="mt-3 text-3xl font-black text-slate-900 sm:text-4xl">Interview prep that feels like your real next step.</h2>
+                <p className="text-sm font-semibold uppercase tracking-[0.18em] text-blue-600 dark:text-blue-400">Why choose us</p>
+                <h2 className="mt-3 text-3xl font-black card-title sm:text-4xl">Interview prep that feels like your real next step.</h2>
               </div>
 
               <ul className="space-y-4">
@@ -210,9 +210,9 @@ export default function Home() {
                   'Personalized guidance that helps you improve with each session.',
                   'Clean mobile-friendly experience built for day-to-day practice.',
                 ].map((item) => (
-                  <li key={item} className="flex items-start gap-3 rounded-2xl bg-white/80 p-3 shadow-sm">
-                    <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-sm text-emerald-600">✓</span>
-                    <span className="text-sm leading-6 text-slate-700 sm:text-base">{item}</span>
+                  <li key={item} className="flex items-start gap-3 rounded-2xl card-bg p-3 shadow-sm dark:border dark:border-slate-700">
+                    <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-sm text-emerald-600 dark:bg-emerald-900/40 dark:text-emerald-400">✓</span>
+                    <span className="text-sm leading-6 card-text sm:text-base">{item}</span>
                   </li>
                 ))}
               </ul>
@@ -232,25 +232,25 @@ export default function Home() {
 
 function FeatureCard({ icon, title, description }) {
   return (
-    <div className="reveal-card feature-card group rounded-[1.75rem] border border-slate-200 bg-white/85 p-5 shadow-soft backdrop-blur-sm sm:p-6">
+    <div className="reveal-card feature-card group rounded-[1.75rem] border border-slate-200 card-bg p-5 shadow-soft sm:p-6 dark:border-slate-700">
       <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-blue-500 to-violet-500 text-3xl shadow-lg shadow-blue-500/20 transition-transform duration-200 group-hover:scale-105">
         {icon}
       </div>
-      <h3 className="mb-2 text-xl font-bold text-slate-900">{title}</h3>
-      <p className="text-sm leading-6 text-slate-600 sm:text-base">{description}</p>
+      <h3 className="mb-2 text-xl font-bold card-title">{title}</h3>
+      <p className="text-sm leading-6 card-text sm:text-base">{description}</p>
     </div>
   );
 }
 
 function Step({ number, title, description }) {
   return (
-    <div className="reveal-card flex gap-3 rounded-[1.5rem] border border-slate-200 bg-white/90 p-4 shadow-soft transition-transform duration-200 hover:-translate-y-0.5 hover:shadow-md sm:gap-4 sm:p-5">
+    <div className="reveal-card flex gap-3 rounded-[1.5rem] border border-slate-200 card-bg p-4 shadow-soft transition-transform duration-200 hover:-translate-y-0.5 hover:shadow-md sm:gap-4 sm:p-5 dark:border-slate-700">
       <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-blue-600 to-violet-600 text-sm font-black text-white shadow-lg shadow-blue-500/20 sm:h-12 sm:w-12 sm:text-base">
         {number}
       </div>
       <div className="min-w-0">
-        <h3 className="text-base font-bold text-slate-900 sm:text-lg">{title}</h3>
-        <p className="mt-1 text-sm leading-6 text-slate-600 sm:text-base">{description}</p>
+        <h3 className="text-base font-bold card-title sm:text-lg">{title}</h3>
+        <p className="mt-1 text-sm leading-6 card-text sm:text-base">{description}</p>
       </div>
     </div>
   );

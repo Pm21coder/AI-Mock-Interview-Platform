@@ -225,6 +225,49 @@
       radial-gradient(circle at bottom right, rgba(168, 85, 247, 0.2), transparent 18%),
       linear-gradient(180deg, #020817 0%, #0b1120 24%, #111827 100%);
   }
+
+  /* Theme-aware card backgrounds */
+  .card-bg {
+    @apply bg-white/85 backdrop-blur-sm;
+  }
+
+  html.dark .card-bg {
+    @apply bg-slate-900/70 backdrop-blur-sm;
+  }
+
+  /* Theme-aware card text */
+  .card-title {
+    @apply text-slate-900;
+  }
+
+  html.dark .card-title {
+    @apply text-slate-100;
+  }
+
+  .card-text {
+    @apply text-slate-600;
+  }
+
+  html.dark .card-text {
+    @apply text-slate-400;
+  }
+
+  .card-muted {
+    @apply text-slate-700;
+  }
+
+  html.dark .card-muted {
+    @apply text-slate-300;
+  }
+
+  /* Light section background */
+  .section-light-bg {
+    @apply bg-gradient-to-br from-blue-50 via-white to-violet-50;
+  }
+
+  html.dark .section-light-bg {
+    @apply bg-gradient-to-br from-slate-900/50 via-slate-800/40 to-slate-900/50 border-slate-700/60;
+  }
 }
 
 @keyframes floatGlow {
