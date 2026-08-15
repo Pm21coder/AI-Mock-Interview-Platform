@@ -14,7 +14,7 @@ dnspython==2.5.0
 python-dotenv==1.1.0
 
 # Authentication & Security
-PyJWT==2.10.1
+PyJWT==2.13.0
 bcrypt==4.3.0
 
 # AI & LLM (single Gemini SDK)
