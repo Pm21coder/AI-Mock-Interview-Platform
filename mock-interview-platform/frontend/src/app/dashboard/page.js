@@ -35,13 +35,18 @@ export default function DashboardPage() {
   const [error, setError] = useState(null);
   const [lastUpdated, setLastUpdated] = useState(null);
   const [liveUpdate, setLiveUpdate] = useState(false);
+  const [isFallbackData, setIsFallbackData] = useState(false);
+  const [retrying, setRetrying] = useState(false);
   const username = useSyncExternalStore(subscribeToAuthChanges, getUsernameSnapshot, () => '');
 
   const fetchDashboardData = useCallback(async () => {
     try {
       setLoading(true);
+      setRetrying(false);
       const data = await getDashboardStats();
       const payload = data?.stats ? data : (data?.data ? data.data : data);
+      const fallbackState = Boolean(data?.fallback || payload?.fallback);
+      setIsFallbackData(fallbackState);
 
       if (!payload) {
         setError('Server returned an unexpected response');
@@ -70,10 +75,22 @@ export default function DashboardPage() {
     } catch (err) {
       console.error('Failed to fetch dashboard data:', err);
       setError('Failed to load dashboard data. Please check your connection.');
+      setRetrying(true);
     } finally {
       setLoading(false);
     }
   }, []);
+
+  useEffect(() => {
+    if (isFallbackData && !retrying) {
+      const reconnectTimer = setTimeout(() => {
+        fetchDashboardData();
+      }, 8000);
+      return () => clearTimeout(reconnectTimer);
+    }
+
+    return undefined;
+  }, [fetchDashboardData, isFallbackData, retrying]);
 
   useEffect(() => {
     const needsFreshFetch = typeof window !== 'undefined' && window.sessionStorage.getItem('dashboard_refresh') === 'true';
@@ -162,18 +179,32 @@ export default function DashboardPage() {
       <main className="container mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
         <div className="mb-8 flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
           <div>
-            <p className="text-sm font-semibold uppercase tracking-[0.22em] text-indigo-600">Performance overview</p>
-            <h1 className="mt-2 text-3xl font-black tracking-tight text-slate-900 sm:text-4xl">Dashboard</h1>
-            {username && <p className="mt-2 text-sm text-slate-600">Welcome back, {username}! 👋</p>}
+            <p className="text-sm font-semibold uppercase tracking-[0.22em] text-indigo-600 dark:text-indigo-400">Performance overview</p>
+            <h1 className="mt-2 text-3xl font-black tracking-tight text-slate-900 dark:text-slate-100 sm:text-4xl">Dashboard</h1>
+            {username && <p className="mt-2 text-sm text-slate-600 dark:text-slate-300">Welcome back, {username}! 👋</p>}
           </div>
 
           <div className="flex flex-wrap items-center justify-end gap-3">
             {liveUpdate && (
-              <span className="animate-pulse rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold text-emerald-800">
+              <span className="animate-pulse rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold text-emerald-800 dark:bg-emerald-500/15 dark:text-emerald-300">
                 Live update received
               </span>
             )}
-            {lastUpdated && <p className="text-sm text-slate-500">Last updated: {lastUpdated}</p>}
+            {isFallbackData && (
+              <>
+                <span className="rounded-full border border-amber-300 bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-800 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-300">
+                  {retrying ? 'Retrying connection...' : 'Offline demo data'}
+                </span>
+                <button
+                  type="button"
+                  onClick={fetchDashboardData}
+                  className="rounded-xl border border-amber-300 bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-800 transition hover:bg-amber-100 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-300 dark:hover:bg-amber-500/15"
+                >
+                  Reconnect
+                </button>
+              </>
+            )}
+            {lastUpdated && <p className="text-sm text-slate-500 dark:text-slate-400">Last updated: {lastUpdated}</p>}
             <button
               onClick={fetchDashboardData}
               className="rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 px-4 py-2.5 text-sm font-semibold text-white shadow-lg shadow-blue-500/20 transition hover:-translate-y-0.5 hover:shadow-xl"
@@ -209,10 +240,10 @@ export default function DashboardPage() {
           />
         </div>
 
-        <div className="rounded-[1.75rem] border border-slate-200 bg-white/80 p-5 shadow-soft backdrop-blur-sm sm:p-6">
+        <div className="rounded-[1.75rem] border border-slate-200 bg-white/80 p-5 shadow-soft backdrop-blur-sm dark:border-slate-700 dark:bg-slate-900/75 sm:p-6">
           <div className="mb-5 flex items-center justify-between gap-3">
-            <h2 className="text-xl font-bold text-slate-900">Recent Interviews</h2>
-            <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold uppercase tracking-[0.12em] text-slate-600">
+            <h2 className="text-xl font-bold text-slate-900 dark:text-slate-100">Recent Interviews</h2>
+            <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold uppercase tracking-[0.12em] text-slate-600 dark:bg-slate-800 dark:text-slate-200">
               {recentInterviews.length} sessions
             </span>
           </div>
@@ -223,9 +254,9 @@ export default function DashboardPage() {
                 <InterviewRow key={index} interview={item} />
               ))
             ) : (
-              <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-8 text-center text-slate-500">
-                <p className="text-lg font-semibold text-slate-700">No recent interviews to display.</p>
-                <p className="mt-2 text-sm">Complete an interview to see your results here.</p>
+              <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-8 text-center text-slate-500 dark:border-slate-700 dark:bg-slate-900/60 dark:text-slate-300">
+                <p className="text-lg font-semibold text-slate-700 dark:text-slate-200">No recent interviews to display.</p>
+                <p className="mt-2 text-sm dark:text-slate-300">Complete an interview to see your results here.</p>
               </div>
             )}
           </div>
@@ -272,12 +303,12 @@ function InterviewRow({ interview }) {
   const displayConfidence = typeof interview.confidence === 'number' ? `${interview.confidence}%` : interview.confidence;
 
   return (
-    <div className="flex flex-col gap-3 rounded-[1.25rem] border border-slate-200 bg-gradient-to-r from-slate-50 to-white p-4 transition-transform duration-200 hover:-translate-y-0.5 hover:shadow-md sm:flex-row sm:items-center sm:justify-between">
+    <div className="flex flex-col gap-3 rounded-[1.25rem] border border-slate-200 bg-gradient-to-r from-slate-50 to-white p-4 transition-transform duration-200 hover:-translate-y-0.5 hover:shadow-md dark:border-slate-700 dark:from-slate-800 dark:to-slate-900 sm:flex-row sm:items-center sm:justify-between">
       <div className="flex items-center gap-4">
-        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-blue-100 to-violet-100 text-xl shadow-inner">💼</div>
+        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-blue-100 to-violet-100 text-xl shadow-inner dark:from-blue-900/70 dark:to-violet-900/70">💼</div>
         <div>
-          <p className="font-bold text-slate-900">{interview.role}</p>
-          <p className="text-sm text-slate-500">{new Date(interview.date).toLocaleDateString()}</p>
+          <p className="font-bold text-slate-900 dark:text-slate-100">{interview.role}</p>
+          <p className="text-sm text-slate-500 dark:text-slate-400">{new Date(interview.date).toLocaleDateString()}</p>
         </div>
       </div>
 
