@@ -9,6 +9,7 @@ It is safe to run multiple times (idempotent).
 from datetime import datetime, timedelta
 
 from app import create_app, mongo
+from app.utils.time import utc_now
 
 # ---------------------------------------------------------------------------
 # Collection definitions
@@ -77,7 +78,7 @@ def seed_demo_user():
     demo_user = {
         'email': 'demo@mockinterview.app',
         'password_hash': bcrypt.hashpw(b'demo12345', bcrypt.gensalt()).decode('utf-8'),
-        'created_at': datetime.utcnow(),
+        'created_at': utc_now(),
     }
     try:
         result = mongo.db.users.insert_one(demo_user)
@@ -104,7 +105,7 @@ def seed_demo_interviews(user_id, count=5):
     ]
 
     for i, (role, score, confidence) in enumerate(roles):
-        created_at = datetime.utcnow() - timedelta(days=i * 5)
+        created_at = utc_now() - timedelta(days=i * 5)
         interview = {
             '_id': f'demo_seed_{i}',
             'user_id': user_id,

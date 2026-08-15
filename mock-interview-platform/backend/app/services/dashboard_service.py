@@ -3,6 +3,7 @@ from datetime import datetime
 from app import mongo
 from flask import current_app
 from app.models.dashboard import DashboardStats
+from app.utils.time import utc_now
 
 
 class DashboardService:
@@ -41,7 +42,7 @@ class DashboardService:
                 # is older than the normal database-backed cache TTL.
                 if not current_app.config.get('MONGO_AVAILABLE', True):
                     return cached_value
-                if (datetime.utcnow() - ts).total_seconds() < self._cache_ttl_seconds:
+                if (utc_now() - ts).total_seconds() < self._cache_ttl_seconds:
                     return cached_value
 
             # If Mongo is known to be unavailable, avoid touching the client.
@@ -52,7 +53,7 @@ class DashboardService:
             if doc:
                 stats = DashboardStats.from_dict(doc)
                 # Update cache
-                self._cache[user_id] = (stats, datetime.utcnow())
+                self._cache[user_id] = (stats, utc_now())
                 return stats
         except Exception as exc:
             print(f'DashboardService.get_stats error: {exc}')
@@ -70,7 +71,7 @@ class DashboardService:
             stats = DashboardStats(user_id=user_id)
             self.save_stats(stats)
             # Ensure new stats are cached immediately
-            self._cache[user_id] = (stats, datetime.utcnow())
+            self._cache[user_id] = (stats, utc_now())
         return stats
 
     # ------------------------------------------------------------------
@@ -121,7 +122,7 @@ class DashboardService:
                         self._in_memory_processed_sessions.add(session_key)
                         return self.get_stats(user_id) or self.get_or_create_stats(user_id)
                     mongo.db[self.PROCESSED_SESSIONS].insert_one(
-                        {'session_id': session_id, 'user_id': user_id, 'processed_at': datetime.utcnow()}
+                        {'session_id': session_id, 'user_id': user_id, 'processed_at': utc_now()}
                     )
                 except Exception as exc:
                     print(f'DashboardService.update_after_interview guard error: {exc}')
@@ -157,7 +158,7 @@ class DashboardService:
         stats.confidence_score = round(sum(all_confidences) / len(all_confidences)) if all_confidences else 0
 
         # Prepend the new interview to recent list (newest first).
-        created_at = interview.get('created_at', datetime.utcnow())
+        created_at = interview.get('created_at', utc_now())
         recent_entry = {
             'role': interview.get('job_role', 'N/A'),
             'score': score if score is not None else 'N/A',
@@ -167,12 +168,12 @@ class DashboardService:
         stats.recent_interviews.insert(0, recent_entry)
         stats.recent_interviews = stats.recent_interviews[:10]  # Keep latest 10
 
-        stats.updated_at = datetime.utcnow()
+        stats.updated_at = utc_now()
         stats.history_synced_at = stats.updated_at
         self.save_stats(stats)
         # Refresh short-lived cache so immediate reads return the updated stats
         try:
-            self._cache[user_id] = (stats, datetime.utcnow())
+            self._cache[user_id] = (stats, utc_now())
         except Exception:
             pass
         return stats
@@ -224,7 +225,7 @@ class DashboardService:
             if confidence is not None:
                 all_confidences.append(int(confidence * 100))
 
-            created_at = interview.get('created_at', datetime.utcnow())
+            created_at = interview.get('created_at', utc_now())
             recent.append({
                 'role': interview.get('job_role', 'N/A'),
                 'score': score if score is not None else 'N/A',
@@ -236,12 +237,12 @@ class DashboardService:
         stats.confidence_score = round(sum(all_confidences) / len(all_confidences)) if all_confidences else 0
         recent.sort(key=lambda x: x['date'], reverse=True)
         stats.recent_interviews = recent[:10]
-        stats.updated_at = datetime.utcnow()
+        stats.updated_at = utc_now()
         # Mark the record as backfilled so a dashboard with no completed
         # interviews does not query the interview collection on every poll.
         stats.history_synced_at = stats.updated_at
 
         self.save_stats(stats)
         # Cache rebuilt stats
-        self._cache[user_id] = (stats, datetime.utcnow())
+        self._cache[user_id] = (stats, utc_now())
         return stats

@@ -13,6 +13,7 @@ from app.services.nlp_service import NLPService
 from app.services.subscription_service import SubscriptionService
 from app.socket_events import emit_dashboard_update
 from app.utils.auth import token_required
+from app.utils.time import utc_now
 
 logger = logging.getLogger(__name__)
 
@@ -195,7 +196,7 @@ def analyze_answer():
             'nlp_analysis': nlp_service.analyze_answer_quality(answer, expected_answer),
             'gemini_feedback': gemini_feedback,
             'cv_analysis': cv_analysis,
-            'timestamp': datetime.utcnow().isoformat(),
+            'timestamp': utc_now().isoformat(),
         }
         response_record = {'question_index': question_index, 'answer': answer, 'feedback': combined_feedback}
         if session_id in demo_sessions:
@@ -275,7 +276,7 @@ def save_response():
         'question_index': data.get('question_index'),
         'response': data.get('response'),
         'feedback': data.get('feedback'),
-        'timestamp': datetime.utcnow(),
+        'timestamp': utc_now(),
     }
     if current_user_id() != 'guest':
         try:

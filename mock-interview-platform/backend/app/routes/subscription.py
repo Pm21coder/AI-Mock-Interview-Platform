@@ -10,6 +10,7 @@ from app import mongo
 from app.config import Config
 from app.services.subscription_service import SubscriptionService, fallback_subscriptions
 from app.utils.auth import token_required
+from app.utils.time import utc_now
 
 subscription_bp = Blueprint('subscription', __name__)
 subscription_service = SubscriptionService()
@@ -81,7 +82,7 @@ def _subscription_status_payload(tier, status='active', interviews_used=0,
 def _store_fallback_subscription(user_id, tier, razorpay_order_id=None,
                                  razorpay_payment_id=None):
     """Activate a paid plan in memory when MongoDB is unavailable locally."""
-    start_date = datetime.utcnow()
+    start_date = utc_now()
     fallback_subscriptions[str(user_id)] = {
         'tier': tier,
         'status': 'active',
@@ -148,7 +149,7 @@ def create_razorpay_order():
         receipt = 'sub_{}_{}_{}'.format(
             tier[:1],
             hashlib.sha1(str(current_user['_id']).encode('utf-8')).hexdigest()[:8],
-            int(datetime.utcnow().timestamp())
+            int(utc_now().timestamp())
         )
 
         try:
@@ -172,7 +173,7 @@ def create_razorpay_order():
             }), 502
     else:
         # Create a simulated demo order for local testing
-        demo_id = 'order_demo_{}_{}'.format(tier, int(datetime.utcnow().timestamp()))
+        demo_id = 'order_demo_{}_{}'.format(tier, int(utc_now().timestamp()))
         order = {
             'id': demo_id,
             'amount': amount,
@@ -191,7 +192,7 @@ def create_razorpay_order():
         'currency': order['currency'],
         'status': 'created',
         'is_demo': order.get('is_demo', False),
-        'created_at': datetime.utcnow(),
+        'created_at': utc_now(),
     }
     fallback_razorpay_orders[order['id']] = order_record.copy()
 
@@ -275,8 +276,8 @@ def verify_razorpay_payment():
                     '$set': {
                         'subscription_tier': tier,
                         'subscription_status': 'active',
-                        'subscription_start_date': datetime.utcnow(),
-                        'subscription_end_date': datetime.utcnow() + timedelta(days=30),
+                        'subscription_start_date': utc_now(),
+                        'subscription_end_date': utc_now() + timedelta(days=30),
                         'razorpay_order_id': razorpay_order_id,
                         'razorpay_payment_id': razorpay_payment_id,
                         'interviews_used_this_month': 0,
@@ -561,7 +562,7 @@ def submit_email_support():
             'email': current_user.get('email'),
             'subject': subject,
             'message': message,
-            'timestamp': datetime.utcnow(),
+            'timestamp': utc_now(),
             'status': 'open',
             'priority': 'high' if tier == 'pro' else 'normal',
             'tier': tier,

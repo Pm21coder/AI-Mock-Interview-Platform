@@ -16,16 +16,28 @@ from unittest.mock import Mock, patch
 import pytest
 
 from app.routes import auth as auth_routes
+from app.services import subscription_service as subscription_service_module
+from app.services.subscription_service import SubscriptionService, fallback_subscriptions
+from app.utils.time import utc_now
+
+
+@pytest.fixture(autouse=True)
+def clear_fallback_subscriptions():
+    """Keep each test independent from the guest-mode subscription store."""
+    fallback_subscriptions.clear()
+    yield
+    fallback_subscriptions.clear()
+
+
+@pytest.fixture
+def subscription_service(monkeypatch):
+    """Provide an in-memory MongoDB mock to service-level unit tests."""
+    monkeypatch.setattr(subscription_service_module, 'mongo', Mock())
+    return SubscriptionService()
 
 
 class TestSubscriptionService:
     """Test cases for SubscriptionService."""
-
-    @pytest.fixture
-    def subscription_service(self):
-        """Initialize subscription service for testing."""
-        from app.services.subscription_service import SubscriptionService
-        return SubscriptionService()
 
     @pytest.fixture
     def mock_user(self):
@@ -36,8 +48,8 @@ class TestSubscriptionService:
             'subscription_tier': 'free',
             'subscription_status': 'active',
             'interviews_used_this_month': 0,
-            'subscription_start_date': datetime.utcnow(),
-            'subscription_end_date': datetime.utcnow() + timedelta(days=30),
+            'subscription_start_date': utc_now(),
+            'subscription_end_date': utc_now() + timedelta(days=30),
             'is_trial': False,
         }
 
@@ -59,11 +71,11 @@ class TestSubscriptionService:
             'subscription_tier': 'free',
             'subscription_status': 'active',
             'interviews_used_this_month': 3,
-            'subscription_start_date': datetime.utcnow() - timedelta(days=45),
-            'subscription_end_date': datetime.utcnow() - timedelta(days=1),
+            'subscription_start_date': utc_now() - timedelta(days=45),
+            'subscription_end_date': utc_now() - timedelta(days=1),
         }
 
-        with patch('app.mongo.db.users.find_one', return_value=expired_user), \
+        with patch('app.services.subscription_service.mongo.db.users.find_one', return_value=expired_user), \
              patch.object(subscription_service, '_reset_monthly_usage') as reset_mock:
             subscription_service.get_user_subscription('user_free_reset')
             reset_mock.assert_called_once_with('user_free_reset')
@@ -92,12 +104,12 @@ class TestSubscriptionService:
     def test_check_interview_limit_free_tier(self, subscription_service):
         """Test interview limit checking for free tier."""
         # Mock MongoDB user with free tier
-        with patch('app.mongo.db.users.find_one') as mock_find:
+        with patch('app.services.subscription_service.mongo.db.users.find_one') as mock_find:
             mock_find.return_value = {
                 '_id': 'user1',
                 'subscription_tier': 'free',
                 'interviews_used_this_month': 3,
-                'subscription_end_date': datetime.utcnow() + timedelta(days=30),
+                'subscription_end_date': utc_now() + timedelta(days=30),
             }
 
             can_proceed, error = subscription_service.check_interview_limit('user1')
@@ -108,12 +120,12 @@ class TestSubscriptionService:
 
     def test_check_interview_limit_pro_tier(self, subscription_service):
         """Test interview limit checking for pro tier (unlimited)."""
-        with patch('app.mongo.db.users.find_one') as mock_find:
+        with patch('app.services.subscription_service.mongo.db.users.find_one') as mock_find:
             mock_find.return_value = {
                 '_id': 'user2',
                 'subscription_tier': 'pro',
                 'interviews_used_this_month': 1000,
-                'subscription_end_date': datetime.utcnow() + timedelta(days=30),
+                'subscription_end_date': utc_now() + timedelta(days=30),
             }
 
             can_proceed, error = subscription_service.check_interview_limit('user2')
@@ -123,10 +135,10 @@ class TestSubscriptionService:
 
     def test_increment_interview_count(self, subscription_service):
         """Test incrementing interview count."""
-        with patch('app.mongo.db.users.update_one') as mock_update:
+        with patch('app.services.subscription_service.mongo.db.users.update_one') as mock_update:
             mock_update.return_value = Mock(matched_count=1)
 
-            with patch('app.mongo.db.users.find_one') as mock_find:
+            with patch('app.services.subscription_service.mongo.db.users.find_one') as mock_find:
                 mock_find.return_value = {
                     '_id': 'user1',
                     'interviews_used_this_month': 1,
@@ -137,7 +149,7 @@ class TestSubscriptionService:
 
     def test_create_subscription_basic_tier(self, subscription_service):
         """Test creating a basic tier subscription."""
-        with patch('app.mongo.db.users.update_one') as mock_update:
+        with patch('app.services.subscription_service.mongo.db.users.update_one') as mock_update:
             mock_update.return_value = Mock(matched_count=1)
 
             with patch.object(subscription_service, 'get_user_subscription') as mock_get:
@@ -163,7 +175,7 @@ class TestSubscriptionService:
                 {'tier': 'basic', 'status': 'active'},
             ]
 
-            with patch('app.mongo.db.users.update_one') as mock_update:
+            with patch('app.services.subscription_service.mongo.db.users.update_one') as mock_update:
                 mock_update.return_value = Mock(matched_count=1)
 
                 result = subscription_service.upgrade_subscription('user1', 'basic')
@@ -171,7 +183,7 @@ class TestSubscriptionService:
 
     def test_downgrade_to_free(self, subscription_service):
         """Test downgrading subscription to free tier."""
-        with patch('app.mongo.db.users.update_one') as mock_update:
+        with patch('app.services.subscription_service.mongo.db.users.update_one') as mock_update:
             mock_update.return_value = Mock(matched_count=1)
 
             with patch.object(subscription_service, 'get_user_subscription') as mock_get:
@@ -185,7 +197,7 @@ class TestSubscriptionService:
 
     def test_start_trial(self, subscription_service):
         """Test starting a trial subscription."""
-        with patch('app.mongo.db.users.update_one') as mock_update:
+        with patch('app.services.subscription_service.mongo.db.users.update_one') as mock_update:
             mock_update.return_value = Mock(matched_count=1)
 
             with patch.object(subscription_service, 'get_user_subscription') as mock_get:
@@ -217,13 +229,13 @@ class TestSubscriptionService:
 
     def test_get_usage_stats(self, subscription_service):
         """Test getting usage statistics."""
-        with patch('app.mongo.db.users.find_one') as mock_user_find:
+        with patch('app.services.subscription_service.mongo.db.users.find_one') as mock_user_find:
             mock_user_find.return_value = {
                 '_id': 'user1',
-                'created_at': datetime.utcnow(),
+                'created_at': utc_now(),
             }
 
-            with patch('app.mongo.db.interviews.find') as mock_interviews_find:
+            with patch('app.services.subscription_service.mongo.db.interviews.find') as mock_interviews_find:
                 mock_interviews_find.return_value.limit.return_value = [
                     {
                         'job_role': 'Software Engineer',
@@ -249,17 +261,17 @@ class TestSubscriptionService:
 
     def test_billing_history(self, subscription_service):
         """Test retrieving billing history."""
-        with patch('app.mongo.db.billing_history.find') as mock_history:
+        with patch('app.services.subscription_service.mongo.db.billing_history.find') as mock_history:
             mock_history.return_value.sort.return_value.limit.return_value = [
                 {
                     'event_type': 'subscription_created',
                     'tier': 'basic',
-                    'timestamp': datetime.utcnow(),
+                    'timestamp': utc_now(),
                 },
                 {
                     'event_type': 'subscription_upgraded',
                     'tier': 'pro',
-                    'timestamp': datetime.utcnow(),
+                    'timestamp': utc_now(),
                 },
             ]
 
@@ -440,7 +452,7 @@ class TestSubscriptionPerformance:
         # Should complete in < 100ms even with database latency
         import time
 
-        with patch('app.mongo.db.users.find_one') as mock_find:
+        with patch('app.services.subscription_service.mongo.db.users.find_one') as mock_find:
             mock_find.return_value = {
                 '_id': 'user1',
                 'subscription_tier': 'basic',

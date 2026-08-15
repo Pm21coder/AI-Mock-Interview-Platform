@@ -8,6 +8,7 @@ from flask import Blueprint, jsonify, request, current_app
 
 from app import mongo
 from app.config import Config
+from app.utils.time import utc_now
 
 auth_bp = Blueprint('auth', __name__)
 DEMO_EMAIL = 'demo@mockinterview.app'
@@ -19,11 +20,11 @@ local_auth_users = {
         'password_hash': bcrypt.hashpw(
             DEMO_PASSWORD.encode('utf-8'), bcrypt.gensalt()
         ).decode('utf-8'),
-        'created_at': datetime.utcnow(),
+        'created_at': utc_now(),
         'subscription_tier': 'free',
         'subscription_status': 'active',
-        'subscription_start_date': datetime.utcnow(),
-        'subscription_end_date': datetime.utcnow() + timedelta(days=30),
+        'subscription_start_date': utc_now(),
+        'subscription_end_date': utc_now() + timedelta(days=30),
         'interviews_used_this_month': 0,
     }
 }
@@ -71,7 +72,7 @@ def create_token(user):
         {
             'user_id': str(user['_id']),
             'email': user['email'],
-            'exp': datetime.utcnow() + timedelta(days=30)
+            'exp': utc_now() + timedelta(days=30)
         },
         Config.JWT_SECRET_KEY,
         algorithm='HS256',
@@ -94,7 +95,7 @@ def register():
     if find_user(email):
         return jsonify({'error': 'User already exists'}), 409
 
-    now = datetime.utcnow()
+    now = utc_now()
     user = {
         'email': email,
         'password_hash': bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8'),

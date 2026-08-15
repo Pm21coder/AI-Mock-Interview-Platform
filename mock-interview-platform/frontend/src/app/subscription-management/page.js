@@ -363,7 +363,7 @@ export default function SubscriptionManagementPage() {
           {(subscription?.tier === 'basic' || subscription?.tier === 'pro') && (
             <div className="rounded-lg bg-white p-6 shadow-lg">
               <h2 className="mb-4 text-lg font-bold text-gray-900">💬 Email Support</h2>
-              <p className="mb-4 text-gray-600">Get help from our support team. We'll respond within 24 hours.</p>
+              <p className="mb-4 text-gray-600">Get help from our support team. We&apos;ll respond within 24 hours.</p>
               <EmailSupportWidget />
             </div>
           )}

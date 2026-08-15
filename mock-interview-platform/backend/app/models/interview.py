@@ -1,5 +1,6 @@
 from datetime import datetime
 
+from app.utils.time import utc_now
 
 class InterviewQuestion:
     def __init__(self, question, category, difficulty, expected_answer=None):
@@ -22,7 +23,7 @@ class InterviewSession:
         self.user_id = user_id
         self.job_role = job_role
         self.questions = questions
-        self.created_at = created_at or datetime.utcnow()
+        self.created_at = created_at or utc_now()
         self.responses = []
         self.feedback = []
 

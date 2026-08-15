@@ -1,5 +1,6 @@
 from datetime import datetime
 
+from app.utils.time import utc_now
 
 class User:
     def __init__(self, email, password_hash, created_at=None, user_id=None, 
@@ -10,7 +11,7 @@ class User:
         self.user_id = user_id
         self.email = email
         self.password_hash = password_hash
-        self.created_at = created_at or datetime.utcnow()
+        self.created_at = created_at or utc_now()
         self.subscription_tier = subscription_tier  # free, basic, pro
         self.subscription_status = subscription_status  # active, canceled, past_due
         self.interviews_used_this_month = interviews_used_this_month

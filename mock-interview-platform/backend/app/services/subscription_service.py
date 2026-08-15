@@ -10,6 +10,7 @@ import logging
 
 from app import mongo
 from app.config import Config
+from app.utils.time import utc_now
 
 logger = logging.getLogger(__name__)
 
@@ -83,7 +84,7 @@ class SubscriptionService:
             interviews_used = user.get('interviews_used_this_month', 0)
 
         # A paid plan that has expired should be demoted to Free.
-        if end_date and datetime.utcnow() > end_date and tier != 'free':
+        if end_date and utc_now() > end_date and tier != 'free':
             self.downgrade_to_free(user_id)
             return self._free_tier_subscription()
 
@@ -128,7 +129,7 @@ class SubscriptionService:
         if tier not in ['free', 'basic', 'pro']:
             raise ValueError(f'Invalid subscription tier: {tier}')
 
-        start_date = datetime.utcnow()
+        start_date = utc_now()
         # Free tier doesn't expire, paid tiers last 30 days
         duration_days = 30 if tier != 'free' else 365 * 100
         end_date = start_date + timedelta(days=duration_days)
@@ -193,7 +194,7 @@ class SubscriptionService:
 
         # Calculate prorated credit if applicable
         if current_tier != 'free' and old_end:
-            remaining_days = max(0, (old_end - datetime.utcnow()).days)
+            remaining_days = max(0, (old_end - utc_now()).days)
             if remaining_days > 0:
                 self._record_proration_credit(user_id, current_tier, remaining_days)
 
@@ -218,7 +219,7 @@ class SubscriptionService:
                     '$set': {
                         'subscription_tier': 'free',
                         'subscription_status': 'canceled',
-                        'subscription_end_date': datetime.utcnow(),
+                        'subscription_end_date': utc_now(),
                     }
                 }
             )
@@ -404,7 +405,7 @@ class SubscriptionService:
                 'user_id': user_id,
                 'event_type': event_type,
                 'tier': tier,
-                'timestamp': datetime.utcnow(),
+                'timestamp': utc_now(),
                 'start_date': start_date,
                 'end_date': end_date,
                 'amount': amount,
@@ -423,7 +424,7 @@ class SubscriptionService:
                 'user_id': user_id,
                 'event_type': 'proration_credit',
                 'tier': tier,
-                'timestamp': datetime.utcnow(),
+                'timestamp': utc_now(),
                 'amount': credit,
                 'remaining_days': remaining_days,
             })
@@ -449,7 +450,7 @@ class SubscriptionService:
         if tier not in ['basic', 'pro']:
             raise ValueError(f'Cannot trial tier: {tier}')
 
-        start_date = datetime.utcnow()
+        start_date = utc_now()
         end_date = start_date + timedelta(days=trial_days)
 
         try:
@@ -485,7 +486,7 @@ class SubscriptionService:
         if not end_date:
             return 0
 
-        remaining = (end_date - datetime.utcnow()).days
+        remaining = (end_date - utc_now()).days
         return max(0, remaining)
 
     # ========================
@@ -545,7 +546,7 @@ class SubscriptionService:
         """Return a subscription payload for a locally stored paid plan."""
         tier = fallback_subscription.get('tier', 'free')
         end_date = fallback_subscription.get('subscription_end_date')
-        if end_date and datetime.utcnow() > end_date:
+        if end_date and utc_now() > end_date:
             return self._free_tier_subscription()
 
         plan_info = self.config_tiers.get(tier, self.config_tiers['free'])
@@ -576,12 +577,12 @@ class SubscriptionService:
         end_date = user.get('subscription_end_date')
         if not end_date:
             return True
-        return datetime.utcnow() > end_date
+        return utc_now() > end_date
 
     def _reset_monthly_usage(self, user_id):
         """Reset monthly usage counters."""
         try:
-            now = datetime.utcnow()
+            now = utc_now()
             mongo.db.users.update_one(
                 {'_id': user_id},
                 {
@@ -697,7 +698,7 @@ class SubscriptionService:
             # Unlimited history
             return feedback_records
         
-        cutoff_date = datetime.utcnow() - timedelta(days=history_days)
+        cutoff_date = utc_now() - timedelta(days=history_days)
         filtered = []
         
         for record in feedback_records:

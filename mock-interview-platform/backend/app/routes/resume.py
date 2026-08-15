@@ -8,6 +8,7 @@ from app import mongo
 from app.services.gemini_service import GeminiService
 from app.services.subscription_service import SubscriptionService
 from app.utils.auth import token_required
+from app.utils.time import utc_now
 
 resume_bp = Blueprint('resume', __name__)
 gemini_service = GeminiService()
@@ -78,7 +79,7 @@ def upload_resume():
             'file_path': filepath,
             'resume_text': resume_text[:1000],  # Store first 1000 chars
             'analysis': analysis,
-            'uploaded_at': datetime.utcnow(),
+            'uploaded_at': utc_now(),
         }
         demo_resumes[resume_document['_id']] = resume_document
         

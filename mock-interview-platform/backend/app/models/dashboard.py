@@ -1,5 +1,6 @@
 from datetime import datetime
 
+from app.utils.time import utc_now
 
 class DashboardStats:
     """Structured representation of a user's dashboard statistics.
@@ -26,7 +27,7 @@ class DashboardStats:
         self.confidence_score = confidence_score
         self.total_responses = total_responses
         self.recent_interviews = recent_interviews or []
-        self.updated_at = updated_at or datetime.utcnow()
+        self.updated_at = updated_at or utc_now()
         self.history_synced_at = history_synced_at
 
     def to_dict(self):

@@ -63,6 +63,16 @@ Start backend: `python run.py` (runs on http://localhost:5000)
 
 ### 3. Frontend Setup
 In a new terminal:
+### Backend tests
+
+```bash
+cd mock-interview-platform/backend
+pip install -r requirements-dev.txt
+python -m pytest
+```
+
+### Frontend
+
 ```bash
 cd mock-interview-platform/frontend
 npm install
