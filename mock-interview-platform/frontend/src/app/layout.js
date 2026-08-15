@@ -2,10 +2,55 @@ import './globals.css';
 import { GoogleAnalytics, GoogleTagManager } from '@next/third-parties/google';
 import { Toaster } from 'react-hot-toast';
 import { Analytics } from '@vercel/analytics/next';
+import { SITE_URL } from './site';
 
 export const metadata = {
-  title: 'AI Mock Interview Platform',
-  description: 'Practice your interview skills with AI-powered mock interviews',
+  metadataBase: new URL(SITE_URL),
+  title: {
+    default: 'MockInterview AI | Practice Job Interviews with AI',
+    template: '%s | MockInterview AI',
+  },
+  description: 'Prepare for your next job interview with AI-generated questions, personalized feedback, and realistic mock interview practice.',
+  applicationName: 'MockInterview AI',
+  keywords: [
+    'AI mock interview',
+    'interview practice',
+    'job interview preparation',
+    'AI interview coach',
+    'technical interview practice',
+    'behavioral interview questions',
+  ],
+  authors: [{ name: 'MockInterview AI' }],
+  creator: 'MockInterview AI',
+  publisher: 'MockInterview AI',
+  category: 'Career Development',
+  alternates: {
+    canonical: '/',
+  },
+  robots: {
+    index: true,
+    follow: true,
+    googleBot: {
+      index: true,
+      follow: true,
+      'max-image-preview': 'large',
+      'max-snippet': -1,
+      'max-video-preview': -1,
+    },
+  },
+  openGraph: {
+    type: 'website',
+    locale: 'en_US',
+    siteName: 'MockInterview AI',
+    url: '/',
+    title: 'MockInterview AI | Practice Job Interviews with AI',
+    description: 'Build interview confidence with AI-generated questions, realistic practice, and personalized feedback.',
+  },
+  twitter: {
+    card: 'summary',
+    title: 'MockInterview AI | Practice Job Interviews with AI',
+    description: 'Build interview confidence with AI-generated questions, realistic practice, and personalized feedback.',
+  },
   verification: {
     google: 'KTVw_NsHR-ZL_LW6TbOsBSlnlz-DyUoe5p-TcFEhZck',
   },
@@ -23,9 +68,7 @@ export default function RootLayout({ children }) {
   return (
     <html lang="en" data-scroll-behavior="smooth" suppressHydrationWarning>
       <head>
-        <meta name="google-site-verification" content="KTVw_NsHR-ZL_LW6TbOsBSlnlz-DyUoe5p-TcFEhZck" />
         <script id="Cookiebot" src="https://consent.cookiebot.com/uc.js" data-cbid="14c3d677-3235-4db8-a6ac-71c42d55f64c" type="text/javascript" async></script>
-        <meta charSet="utf-8" />
         <meta name="apple-mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
       </head>
