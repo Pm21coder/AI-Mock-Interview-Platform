@@ -6,7 +6,9 @@ from dotenv import load_dotenv
 
 # Load variables from backend/.env for local development. In production the
 # deployment platform injects these as real environment variables.
-load_dotenv(Path(__file__).resolve().parent.parent / '.env')
+# Use override=True so the checked-in local config file can win over stale
+# shell environment values that may still point at an old Atlas DB.
+load_dotenv(Path(__file__).resolve().parent.parent / '.env', override=True)
 
 
 def _with_mongo_timeouts(uri, timeout_ms):
@@ -38,11 +40,26 @@ class Config:
     JWT_ACCESS_TOKEN_EXPIRES = timedelta(hours=24)
 
     # MongoDB Configuration
-    MONGO_CONNECT_TIMEOUT_MS = int(os.getenv('MONGO_CONNECT_TIMEOUT_MS', '1500'))
-    MONGO_URI = _with_mongo_timeouts(
-        os.getenv('MONGODB_URI', 'mongodb://localhost:27017/mock_interview'),
-        MONGO_CONNECT_TIMEOUT_MS,
-    )
+    # Prefer the local project MongoDB for development so the app does not
+    # silently fall back to guest mode when a remote Atlas SRV endpoint is not
+    # reachable from the current machine. Atlas stays available only when an
+    # explicit opt-in is set, which avoids broken SRV URLs taking down local
+    # development.
+    MONGO_CONNECT_TIMEOUT_MS = int(os.getenv('MONGO_CONNECT_TIMEOUT_MS', '5000'))
+    DEFAULT_LOCAL_MONGO_URI = 'mongodb://admin:password123@localhost:27017/mock_interview?authSource=admin'
+    use_atlas = os.getenv('USE_ATLAS_MONGO', 'false').lower() == 'true'
+    env_uri = os.getenv('MONGODB_URI')
+
+    if use_atlas and env_uri:
+        mongo_uri = env_uri
+    elif env_uri and ('mongodb://localhost' in env_uri.lower() or 'mongodb://127.0.0.1' in env_uri.lower() or 'mongodb://admin:' in env_uri.lower()):
+        mongo_uri = env_uri
+    elif env_uri and '.mongodb.net' in env_uri.lower():
+        mongo_uri = DEFAULT_LOCAL_MONGO_URI
+    else:
+        mongo_uri = env_uri or DEFAULT_LOCAL_MONGO_URI
+
+    MONGO_URI = _with_mongo_timeouts(mongo_uri, MONGO_CONNECT_TIMEOUT_MS)
 
     # Google Gemini AI Configuration
     GOOGLE_GEMINI_API_KEY = os.getenv('GOOGLE_GEMINI_API_KEY', '')

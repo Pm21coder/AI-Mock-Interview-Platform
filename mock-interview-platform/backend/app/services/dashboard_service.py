@@ -1,4 +1,6 @@
+import json
 from datetime import datetime
+from pathlib import Path
 
 from app import mongo
 from flask import current_app
@@ -16,6 +18,7 @@ class DashboardService:
     """
 
     COLLECTION = 'dashboard_stats'
+    FALLBACK_STATS_FILE = Path(__file__).resolve().parents[2] / 'data' / 'dashboard_stats.json'
     PROCESSED_SESSIONS = 'dashboard_processed_sessions'
     # Simple per-process TTL cache to reduce repeated DB reads during
     # high-frequency polling from the frontend. Keys are user_id strings.
@@ -29,6 +32,27 @@ class DashboardService:
     # ------------------------------------------------------------------
     # Read operations
     # ------------------------------------------------------------------
+
+    def _load_fallback_stats(self):
+        try:
+            self.FALLBACK_STATS_FILE.parent.mkdir(parents=True, exist_ok=True)
+            if not self.FALLBACK_STATS_FILE.exists():
+                self.FALLBACK_STATS_FILE.write_text('{}', encoding='utf-8')
+                return {}
+            raw = self.FALLBACK_STATS_FILE.read_text(encoding='utf-8').strip()
+            if not raw:
+                return {}
+            payload = json.loads(raw)
+            return payload if isinstance(payload, dict) else {}
+        except Exception:
+            return {}
+
+    def _save_fallback_stats(self, payload):
+        try:
+            self.FALLBACK_STATS_FILE.parent.mkdir(parents=True, exist_ok=True)
+            self.FALLBACK_STATS_FILE.write_text(json.dumps(payload, default=str, indent=2), encoding='utf-8')
+        except Exception:
+            pass
 
     def get_stats(self, user_id):
         """Return the persisted dashboard stats for a user, or None."""
@@ -47,6 +71,12 @@ class DashboardService:
 
             # If Mongo is known to be unavailable, avoid touching the client.
             if not current_app.config.get('MONGO_AVAILABLE', True):
+                payload = self._load_fallback_stats()
+                doc = payload.get(str(user_id))
+                if doc:
+                    stats = DashboardStats.from_dict(doc)
+                    self._cache[user_id] = (stats, utc_now())
+                    return stats
                 return None
 
             doc = mongo.db[self.COLLECTION].find_one({'user_id': user_id})
@@ -81,7 +111,11 @@ class DashboardService:
     def save_stats(self, stats):
         """Upsert the given DashboardStats document."""
         if not current_app.config.get('MONGO_AVAILABLE', True):
-            return False
+            payload = self._load_fallback_stats()
+            payload[str(stats.user_id)] = stats.to_dict()
+            self._save_fallback_stats(payload)
+            self._cache[stats.user_id] = (stats, utc_now())
+            return True
 
         try:
             doc = stats.to_dict()

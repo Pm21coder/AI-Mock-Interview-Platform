@@ -1,9 +1,11 @@
-from datetime import datetime
+import json
+import re
+from datetime import datetime, timedelta
+from pathlib import Path
 from uuid import uuid4
 
 import bcrypt
 import jwt
-from datetime import timedelta
 from flask import Blueprint, jsonify, request, current_app
 
 from app import mongo
@@ -13,21 +15,90 @@ from app.utils.time import utc_now
 auth_bp = Blueprint('auth', __name__)
 DEMO_EMAIL = 'demo@mockinterview.app'
 DEMO_PASSWORD = 'demo12345'
-local_auth_users = {
-    DEMO_EMAIL: {
+AUTH_USERS_FILE = Path(__file__).resolve().parents[2] / 'data' / 'local_auth_users.json'
+
+
+def _default_demo_user():
+    now = utc_now()
+    return {
         '_id': 'demo_default',
         'email': DEMO_EMAIL,
         'password_hash': bcrypt.hashpw(
             DEMO_PASSWORD.encode('utf-8'), bcrypt.gensalt()
         ).decode('utf-8'),
-        'created_at': utc_now(),
+        'created_at': now,
         'subscription_tier': 'free',
         'subscription_status': 'active',
-        'subscription_start_date': utc_now(),
-        'subscription_end_date': utc_now() + timedelta(days=30),
+        'subscription_start_date': now,
+        'subscription_end_date': now + timedelta(days=30),
         'interviews_used_this_month': 0,
     }
-}
+
+
+def load_local_auth_users():
+    try:
+        AUTH_USERS_FILE.parent.mkdir(parents=True, exist_ok=True)
+        if not AUTH_USERS_FILE.exists():
+            payload = {DEMO_EMAIL: _default_demo_user()}
+            save_local_auth_users(payload)
+            return payload
+
+        raw_data = AUTH_USERS_FILE.read_text(encoding='utf-8').strip()
+        if not raw_data:
+            payload = {DEMO_EMAIL: _default_demo_user()}
+            save_local_auth_users(payload)
+            return payload
+
+        data = json.loads(raw_data)
+        if not isinstance(data, dict):
+            return {DEMO_EMAIL: _default_demo_user()}
+
+        normalized = {}
+        for email, user in data.items():
+            if not email:
+                continue
+            normalized[str(email).strip().lower()] = user
+        if DEMO_EMAIL not in normalized:
+            normalized[DEMO_EMAIL] = _default_demo_user()
+        save_local_auth_users(normalized)
+        return normalized
+    except Exception:
+        fallback = {DEMO_EMAIL: _default_demo_user()}
+        save_local_auth_users(fallback)
+        return fallback
+
+
+def save_local_auth_users(users):
+    try:
+        AUTH_USERS_FILE.parent.mkdir(parents=True, exist_ok=True)
+        normalized = {}
+        for email, user in (users or {}).items():
+            if not email:
+                continue
+            normalized[str(email).strip().lower()] = user
+        AUTH_USERS_FILE.write_text(json.dumps(normalized, default=str, indent=2), encoding='utf-8')
+        return normalized
+    except Exception:
+        return users or {}
+
+
+local_auth_users = load_local_auth_users()
+
+
+def validate_password(password):
+    if not isinstance(password, str):
+        return False
+    if len(password) < 8:
+        return False
+    if not re.search(r'[A-Z]', password):
+        return False
+    if not re.search(r'[a-z]', password):
+        return False
+    if not re.search(r'\d', password):
+        return False
+    if not re.search(r'[^A-Za-z0-9]', password):
+        return False
+    return True
 
 
 def _mongo_available():
@@ -41,10 +112,12 @@ def _disable_mongo():
 
 def find_user(email):
     """Use MongoDB when available, otherwise preserve local fallback accounts."""
+    global local_auth_users
     email = (email or '').strip().lower()
     if not email:
         return None
 
+    local_auth_users = load_local_auth_users()
     if email in local_auth_users:
         return local_auth_users[email]
 
@@ -84,14 +157,17 @@ def create_token(user):
 
 @auth_bp.route('/register', methods=['POST'])
 def register():
+    global local_auth_users
     data = request.get_json(silent=True) or {}
     email = (data.get('email') or '').strip().lower()
     password = data.get('password') or ''
 
     if not email or '@' not in email or not password:
         return jsonify({'error': 'A valid email and password are required'}), 400
-    if len(password) < 8:
-        return jsonify({'error': 'Password must contain at least 8 characters'}), 400
+    if not validate_password(password):
+        return jsonify({
+            'error': 'Password must be at least 8 characters and include uppercase, lowercase, a number, and a symbol.'
+        }), 400
     if find_user(email):
         return jsonify({'error': 'User already exists'}), 409
 
@@ -118,10 +194,14 @@ def register():
             )
             _disable_mongo()
             user['_id'] = f'demo_{uuid4()}'
+            local_auth_users = load_local_auth_users()
             local_auth_users[email] = user
+            save_local_auth_users(local_auth_users)
     else:
         user['_id'] = f'demo_{uuid4()}'
+        local_auth_users = load_local_auth_users()
         local_auth_users[email] = user
+        save_local_auth_users(local_auth_users)
 
     return jsonify({
         'token': create_token(user),

@@ -26,6 +26,15 @@ export default function AuthPage() {
 
   const submit = async (event) => {
     event.preventDefault();
+
+    if (isRegistering) {
+      const strongPassword = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z0-9]).{8,}$/;
+      if (!strongPassword.test(password)) {
+        toast.error('Use a strong password with at least 8 characters, including uppercase, lowercase, a number, and a symbol.');
+        return;
+      }
+    }
+
     setIsSubmitting(true);
     try {
       const result = await (isRegistering ? register : login)({ email, password });

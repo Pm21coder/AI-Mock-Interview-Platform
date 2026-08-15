@@ -1,3 +1,5 @@
+import os
+
 from flask import Flask
 from flask_cors import CORS
 from flask_pymongo import PyMongo
@@ -7,6 +9,10 @@ from app.config import Config
 
 mongo = PyMongo()
 socketio = SocketIO(cors_allowed_origins='*')
+
+
+def _fallback_local_mongo_uri():
+    return os.getenv('MONGODB_LOCAL_URI', 'mongodb://admin:password123@localhost:27017/mock_interview?authSource=admin')
 
 
 def _check_secret_keys(app):
@@ -58,28 +64,39 @@ def create_app(config_class=Config):
     # support guest sessions in memory, so do not let that optional dependency
     # prevent Flask from starting and cause the frontend proxy connection to
     # be reset.
-    try:
-        mongo.init_app(app)
+    local_uri = _fallback_local_mongo_uri()
+    configured_uri = app.config.get('MONGO_URI') or ''
+    cloud_uri = configured_uri if '.mongodb.net' in configured_uri.lower() or 'mongodb+srv://' in configured_uri.lower() else ''
+
+    mongo_uris = [local_uri]
+    if cloud_uri and os.getenv('USE_ATLAS_MONGO', 'false').lower() == 'true':
+        mongo_uris.insert(0, cloud_uri)
+
+    mongo_initialized = False
+    for uri in [u for u in mongo_uris if u]:
         try:
+            mongo.init_app(app, uri=uri)
             with app.app_context():
                 mongo.cx.admin.command('ping')
+            app.config['MONGO_URI'] = uri
             app.config['MONGO_AVAILABLE'] = True
-            app.logger.info('✓ MongoDB connection successful')
+            app.logger.info('✓ MongoDB connection successful using %s', uri)
+            mongo_initialized = True
+            break
         except Exception as exc:
-            app.config['MONGO_AVAILABLE'] = False
             exc_str = str(exc)
-            if 'timed out' in exc_str.lower() or 'timeout' in exc_str.lower():
-                app.logger.warning(
-                    '⚠ MongoDB SRV connection timeout (DNS/network issue). '
-                    'Running in guest mode. Increase MONGO_CONNECT_TIMEOUT_MS if needed.'
-                )
-            else:
-                app.logger.warning(
-                    '⚠ MongoDB unavailable; starting in guest mode. Error: %s', exc
-                )
-    except Exception as exc:
+            app.logger.warning('MongoDB connection attempt failed for %s: %s', uri, exc_str)
+            continue
+
+    if not mongo_initialized:
         app.config['MONGO_AVAILABLE'] = False
-        app.logger.warning('⚠ MongoDB initialization failed; starting in guest mode: %s', exc)
+        if cloud_uri:
+            app.logger.warning(
+                '⚠ MongoDB connection failed for both local and Atlas targets; starting in guest mode. '
+                'For local development, start the project MongoDB container or set USE_ATLAS_MONGO=true to allow remote Atlas access.'
+            )
+        else:
+            app.logger.warning('⚠ MongoDB unavailable; starting in guest mode.')
     socketio.init_app(app)
 
     from app.routes.interview import interview_bp
