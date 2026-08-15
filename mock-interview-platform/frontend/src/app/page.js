@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect } from 'react';
 import Link from 'next/link';
 import Navigation from '../components/Navigation';
 
@@ -10,6 +11,25 @@ const stats = [
 ];
 
 export default function Home() {
+  useEffect(() => {
+    const revealElements = document.querySelectorAll('.reveal-card');
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          if (entry.isIntersecting) {
+            entry.target.classList.add('is-visible');
+          }
+        });
+      },
+      { threshold: 0.15 }
+    );
+
+    revealElements.forEach((element) => observer.observe(element));
+
+    return () => observer.disconnect();
+  }, []);
+
   return (
     <div className="page-shell min-h-screen overflow-x-hidden">
       <Navigation />
@@ -73,36 +93,21 @@ export default function Home() {
                   </div>
 
                   <div className="grid gap-4 md:grid-cols-[1.2fr_0.8fr]">
-                    <div
-                      className="relative overflow-hidden rounded-[1.5rem] border border-white/10 bg-slate-900 p-3"
-                      style={{
-                        backgroundImage:
-                          "linear-gradient(180deg, rgba(15, 23, 42, 0.15), rgba(15, 23, 42, 0.85)), url('https://images.unsplash.com/photo-1522202176988-66273c2fd55f?auto=format&fit=crop&w=900&q=80')",
-                        backgroundSize: 'cover',
-                        backgroundPosition: 'center',
-                        minHeight: '260px',
-                      }}
-                    >
-                      <div className="absolute inset-0 bg-gradient-to-tr from-blue-600/30 via-indigo-500/10 to-transparent" />
-                      <div className="relative flex h-full flex-col justify-between">
-                        <div className="flex items-center justify-between">
-                          <span className="rounded-full border border-white/20 bg-slate-950/40 px-2.5 py-1 text-[10px] font-medium uppercase tracking-[0.14em] text-slate-100 backdrop-blur">
-                            Interview
-                          </span>
-                          <span className="rounded-full bg-emerald-400/90 px-2.5 py-1 text-[10px] font-bold text-emerald-950">
-                            Live
-                          </span>
+                    <div className="relative overflow-hidden rounded-[1.5rem] border border-white/10 bg-slate-900 p-3">
+                      <img
+                        src="https://images.unsplash.com/photo-1522202176988-66273c2fd55f?auto=format&fit=crop&w=900&q=80"
+                        alt="Interview coaching session"
+                        className="h-[260px] w-full rounded-[1.2rem] object-cover"
+                      />
+                      <div className="absolute inset-0 bg-gradient-to-tr from-blue-600/35 via-indigo-500/10 to-transparent" />
+                      <div className="absolute inset-x-3 bottom-3 rounded-2xl border border-white/10 bg-slate-950/45 p-3 backdrop-blur-md">
+                        <p className="text-[10px] uppercase tracking-[0.2em] text-sky-200">Confidence</p>
+                        <div className="mt-2 flex items-end justify-between gap-2">
+                          <span className="text-3xl font-black text-white">92%</span>
+                          <span className="text-xs text-emerald-300">+18% this week</span>
                         </div>
-
-                        <div className="rounded-2xl border border-white/10 bg-slate-950/45 p-3 backdrop-blur-md">
-                          <p className="text-[10px] uppercase tracking-[0.2em] text-sky-200">Confidence</p>
-                          <div className="mt-2 flex items-end justify-between gap-2">
-                            <span className="text-3xl font-black text-white">92%</span>
-                            <span className="text-xs text-emerald-300">+18% this week</span>
-                          </div>
-                          <div className="mt-3 h-2 overflow-hidden rounded-full bg-white/10">
-                            <div className="h-full w-[92%] rounded-full bg-gradient-to-r from-emerald-400 to-cyan-400" />
-                          </div>
+                        <div className="mt-3 h-2 overflow-hidden rounded-full bg-white/10">
+                          <div className="h-full w-[92%] rounded-full bg-gradient-to-r from-emerald-400 to-cyan-400" />
                         </div>
                       </div>
                     </div>
@@ -227,7 +232,7 @@ export default function Home() {
 
 function FeatureCard({ icon, title, description }) {
   return (
-    <div className="feature-card group rounded-[1.75rem] border border-slate-200 bg-white/85 p-5 shadow-soft backdrop-blur-sm sm:p-6">
+    <div className="reveal-card feature-card group rounded-[1.75rem] border border-slate-200 bg-white/85 p-5 shadow-soft backdrop-blur-sm sm:p-6">
       <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-blue-500 to-violet-500 text-3xl shadow-lg shadow-blue-500/20 transition-transform duration-200 group-hover:scale-105">
         {icon}
       </div>
@@ -239,7 +244,7 @@ function FeatureCard({ icon, title, description }) {
 
 function Step({ number, title, description }) {
   return (
-    <div className="flex gap-3 rounded-[1.5rem] border border-slate-200 bg-white/90 p-4 shadow-soft transition-transform duration-200 hover:-translate-y-0.5 hover:shadow-md sm:gap-4 sm:p-5">
+    <div className="reveal-card flex gap-3 rounded-[1.5rem] border border-slate-200 bg-white/90 p-4 shadow-soft transition-transform duration-200 hover:-translate-y-0.5 hover:shadow-md sm:gap-4 sm:p-5">
       <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-blue-600 to-violet-600 text-sm font-black text-white shadow-lg shadow-blue-500/20 sm:h-12 sm:w-12 sm:text-base">
         {number}
       </div>

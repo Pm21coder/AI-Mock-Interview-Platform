@@ -144,6 +144,24 @@
     background: radial-gradient(circle, rgba(59, 130, 246, 0.18), transparent 65%);
   }
 
+  .reveal-card {
+    opacity: 0;
+    transform: translateY(24px);
+    transition: opacity 0.6s ease, transform 0.6s ease;
+  }
+
+  .reveal-card.is-visible {
+    opacity: 1;
+    transform: translateY(0);
+  }
+
+  .dashboard-shell {
+    background:
+      radial-gradient(circle at top left, rgba(59, 130, 246, 0.18), transparent 25%),
+      radial-gradient(circle at bottom right, rgba(168, 85, 247, 0.16), transparent 20%),
+      linear-gradient(180deg, #f8fbff 0%, #eef4ff 18%, #f8fafc 100%);
+  }
+
   .float-badge {
     position: absolute;
     display: inline-flex;
@@ -162,6 +180,50 @@
     animation: floatBadge 7s ease-in-out infinite;
     backdrop-filter: blur(10px);
     -webkit-backdrop-filter: blur(10px);
+  }
+
+  html.dark body {
+    background:
+      radial-gradient(circle at top left, rgba(96, 165, 250, 0.2), transparent 24%),
+      radial-gradient(circle at bottom right, rgba(168, 85, 247, 0.18), transparent 22%),
+      linear-gradient(180deg, #020817 0%, #0f172a 25%, #111827 100%);
+    color: #e2e8f0;
+  }
+
+  html.dark .page-shell::before {
+    background-image: linear-gradient(rgba(148, 163, 184, 0.08) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(148, 163, 184, 0.08) 1px, transparent 1px);
+  }
+
+  html.dark .feature-card,
+  html.dark .reveal-card,
+  html.dark .rounded-\[2rem\],
+  html.dark .rounded-\[1\.75rem\],
+  html.dark .rounded-\[1\.5rem\] {
+    box-shadow: 0 20px 45px -28px rgba(15, 23, 42, 0.95);
+  }
+
+  html.dark .feature-card {
+    background: rgba(15, 23, 42, 0.82);
+    border-color: rgba(148, 163, 184, 0.2);
+  }
+
+  html.dark .feature-card p,
+  html.dark .reveal-card p,
+  html.dark .reveal-card h3,
+  html.dark .page-shell h1,
+  html.dark .page-shell h2,
+  html.dark .page-shell h3,
+  html.dark .page-shell li,
+  html.dark .page-shell span {
+    color: inherit;
+  }
+
+  html.dark .dashboard-shell {
+    background:
+      radial-gradient(circle at top left, rgba(59, 130, 246, 0.2), transparent 22%),
+      radial-gradient(circle at bottom right, rgba(168, 85, 247, 0.2), transparent 18%),
+      linear-gradient(180deg, #020817 0%, #0b1120 24%, #111827 100%);
   }
 }
 

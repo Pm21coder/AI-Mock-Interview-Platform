@@ -1,13 +1,11 @@
 'use client';
 
 import Link from 'next/link';
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { useSyncExternalStore } from 'react';
 import { useRouter } from 'next/navigation';
 import { disconnectSocket } from '../utils/socket';
 
-// Custom store that tracks auth state changes both across tabs (via the
-// 'storage' event) and within the same tab (via a custom 'auth-change' event).
 const authStore = {
   getSnapshot: () => window.localStorage.getItem('auth_email') || '',
   subscribe: (callback) => {
@@ -33,11 +31,23 @@ export default function Navigation() {
   const router = useRouter();
   const email = useSyncExternalStore(authStore.subscribe, authStore.getSnapshot, getServerAuthEmail);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const [darkMode, setDarkMode] = useState(false);
+
+  useEffect(() => {
+    const savedTheme = window.localStorage.getItem('theme-preference');
+    const isDark = savedTheme === 'dark';
+    setDarkMode(isDark);
+    document.documentElement.classList.toggle('dark', isDark);
+  }, []);
+
+  useEffect(() => {
+    document.documentElement.classList.toggle('dark', darkMode);
+    window.localStorage.setItem('theme-preference', darkMode ? 'dark' : 'light');
+  }, [darkMode]);
 
   const signOut = useCallback(() => {
-    // Disconnect Socket.IO connection to avoid receiving old user's broadcasts
     disconnectSocket();
-    
+
     window.localStorage.removeItem('auth_token');
     window.localStorage.removeItem('auth_email');
     window.dispatchEvent(new Event('auth-change'));
@@ -49,92 +59,100 @@ export default function Navigation() {
     setIsMenuOpen(false);
   }, []);
 
+  const navClass = darkMode
+    ? 'sticky top-0 z-50 w-full border-b border-white/10 bg-slate-950/80 text-white shadow-lg shadow-slate-950/30 backdrop-blur-xl'
+    : 'sticky top-0 z-50 w-full border-b border-slate-200 bg-white/80 text-slate-900 shadow-sm backdrop-blur-xl';
+
+  const linkClass = darkMode
+    ? 'rounded-md px-3 py-2 text-sm font-medium text-slate-200 transition-colors hover:bg-white/5 hover:text-white lg:px-4 lg:py-2'
+    : 'rounded-md px-3 py-2 text-sm font-medium text-gray-600 transition-colors hover:bg-gray-50 hover:text-gray-900 lg:px-4 lg:py-2';
+
+  const buttonBase = darkMode
+    ? 'rounded-xl bg-gradient-to-r from-blue-500 to-violet-500 px-4 py-2 text-sm font-medium text-white shadow-lg shadow-blue-500/20 transition hover:brightness-110'
+    : 'rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-lg shadow-blue-500/20 transition hover:brightness-110';
+
   return (
-    <nav className="sticky top-0 z-50 w-full bg-white shadow-sm">
+    <nav className={navClass}>
       <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
         <div className="flex h-16 items-center justify-between sm:h-20">
-          {/* Logo */}
           <Link
             href="/"
-            className="flex-shrink-0 text-xl font-bold text-blue-600 hover:text-blue-700 transition-colors sm:text-2xl"
+            className="flex-shrink-0 text-xl font-black tracking-tight text-blue-500 transition-colors hover:text-blue-400 sm:text-2xl"
             onClick={closeMenu}
           >
-            MockInterview<span className="hidden sm:inline"> AI</span>
+            MockInterview<span className="hidden sm:inline text-slate-400"> AI</span>
           </Link>
 
-          {/* Desktop Navigation */}
-          <div className="hidden md:flex items-center gap-1 lg:gap-2">
+          <div className="hidden items-center gap-1 md:flex lg:gap-2">
             {navigationLinks.map((link) => (
-              <Link
-                key={link.href}
-                href={link.href}
-                className="px-3 py-2 text-sm font-medium text-gray-600 hover:text-gray-900 hover:bg-gray-50 rounded-md transition-colors lg:px-4 lg:py-2"
-              >
+              <Link key={link.href} href={link.href} className={linkClass}>
                 {link.label}
               </Link>
             ))}
           </div>
 
-          {/* Auth Buttons - Desktop */}
-          <div className="hidden md:flex items-center gap-3">
+          <div className="hidden items-center gap-3 md:flex">
+            <button
+              type="button"
+              onClick={() => setDarkMode((prev) => !prev)}
+              className={darkMode
+                ? 'inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-2 text-xs font-semibold uppercase tracking-[0.12em] text-slate-200 transition hover:bg-white/10'
+                : 'inline-flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-semibold uppercase tracking-[0.12em] text-slate-700 transition hover:bg-slate-100'}
+              aria-label="Toggle color theme"
+            >
+              <span>{darkMode ? '☀️' : '🌙'}</span>
+              {darkMode ? 'Light' : 'Dark'}
+            </button>
+
             {email ? (
               <>
-                <span className="text-sm text-gray-600 px-3 py-2 rounded-md">
+                <span className={darkMode ? 'rounded-md px-3 py-2 text-sm text-slate-300' : 'rounded-md px-3 py-2 text-sm text-gray-600'}>
                   {email}
                 </span>
-                <button
-                  onClick={signOut}
-                  className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 transition-colors"
-                >
+                <button onClick={signOut} className={buttonBase}>
                   Sign out
                 </button>
               </>
             ) : (
-              <Link
-                href="/auth"
-                className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 transition-colors"
-              >
+              <Link href="/auth" className={buttonBase}>
                 Sign in
               </Link>
             )}
           </div>
 
-          {/* Mobile Menu Button */}
-          <button
-            onClick={() => setIsMenuOpen(!isMenuOpen)}
-            className="md:hidden inline-flex items-center justify-center p-2 text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-md transition-colors"
-            aria-expanded={isMenuOpen}
-            aria-label="Toggle navigation menu"
-          >
-            <svg
-              className="h-6 w-6"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
+          <div className="flex items-center gap-2 md:hidden">
+            <button
+              type="button"
+              onClick={() => setDarkMode((prev) => !prev)}
+              className={darkMode
+                ? 'inline-flex h-10 w-10 items-center justify-center rounded-full border border-white/10 bg-white/5 text-lg'
+                : 'inline-flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 bg-slate-50 text-lg'}
+              aria-label="Toggle color theme"
             >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d={
-                  isMenuOpen
-                    ? 'M6 18L18 6M6 6l12 12'
-                    : 'M4 6h16M4 12h16M4 18h16'
-                }
-              />
-            </svg>
-          </button>
+              {darkMode ? '☀️' : '🌙'}
+            </button>
+
+            <button
+              onClick={() => setIsMenuOpen(!isMenuOpen)}
+              className={darkMode ? 'inline-flex h-10 w-10 items-center justify-center rounded-md text-slate-200 hover:bg-white/5' : 'inline-flex h-10 w-10 items-center justify-center rounded-md text-gray-600 hover:bg-gray-100'}
+              aria-expanded={isMenuOpen}
+              aria-label="Toggle navigation menu"
+            >
+              <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={isMenuOpen ? 'M6 18L18 6M6 6l12 12' : 'M4 6h16M4 12h16M4 18h16'} />
+              </svg>
+            </button>
+          </div>
         </div>
 
-        {/* Mobile Menu */}
         {isMenuOpen && (
-          <div className="md:hidden border-t border-gray-200">
+          <div className={darkMode ? 'border-t border-white/10 md:hidden' : 'border-t border-gray-200 md:hidden'}>
             <div className="space-y-1 px-2 py-3">
               {navigationLinks.map((link) => (
                 <Link
                   key={link.href}
                   href={link.href}
-                  className="block px-3 py-2 rounded-md text-base font-medium text-gray-600 hover:text-gray-900 hover:bg-gray-50 transition-colors"
+                  className={darkMode ? 'block rounded-md px-3 py-2 text-base font-medium text-slate-200 hover:bg-white/5 hover:text-white' : 'block rounded-md px-3 py-2 text-base font-medium text-gray-600 hover:bg-gray-50 hover:text-gray-900'}
                   onClick={closeMenu}
                 >
                   {link.label}
@@ -142,16 +160,13 @@ export default function Navigation() {
               ))}
             </div>
 
-            {/* Mobile Auth Section */}
-            <div className="border-t border-gray-200 px-2 py-3 space-y-2">
+            <div className={darkMode ? 'space-y-2 border-t border-white/10 px-2 py-3' : 'space-y-2 border-t border-gray-200 px-2 py-3'}>
               {email ? (
                 <>
-                  <p className="text-sm text-gray-600 px-3 py-2">
-                    {email}
-                  </p>
+                  <p className={darkMode ? 'px-3 py-2 text-sm text-slate-300' : 'px-3 py-2 text-sm text-gray-600'}>{email}</p>
                   <button
                     onClick={signOut}
-                    className="w-full rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 transition-colors"
+                    className="w-full rounded-lg bg-gradient-to-r from-blue-600 to-indigo-600 px-4 py-2 text-sm font-medium text-white transition hover:brightness-110"
                   >
                     Sign out
                   </button>
@@ -159,7 +174,7 @@ export default function Navigation() {
               ) : (
                 <Link
                   href="/auth"
-                  className="block w-full text-center rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 transition-colors"
+                  className="block w-full rounded-lg bg-gradient-to-r from-blue-600 to-indigo-600 px-4 py-2 text-center text-sm font-medium text-white transition hover:brightness-110"
                   onClick={closeMenu}
                 >
                   Sign in
