@@ -1,5 +1,6 @@
 import './globals.css';
 import { Toaster } from 'react-hot-toast';
+import { Analytics } from '@vercel/analytics/next';
 
 export const metadata = {
   title: 'AI Mock Interview Platform',
@@ -53,6 +54,7 @@ export default function RootLayout({ children }) {
         {/* End Google Tag Manager (noscript) */}
         {children}
         <Toaster position="top-right" reverseOrder={false} />
+        <Analytics />
       </body>
     </html>
   );
