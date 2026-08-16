@@ -1,4 +1,5 @@
 import os
+import logging
 
 from flask import Flask
 from flask_cors import CORS
@@ -57,6 +58,17 @@ def create_app(config_class=Config):
     app = Flask(__name__)
     app.config.from_object(config_class)
 
+    # Configure logging for email service
+    email_logger = logging.getLogger('app.services.email_service')
+    email_logger.setLevel(logging.INFO)
+    
+    # Add console handler if not already present
+    if not email_logger.handlers:
+        console_handler = logging.StreamHandler()
+        formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+        console_handler.setFormatter(formatter)
+        email_logger.addHandler(console_handler)
+    
     # Security check: ensure secret keys are not public defaults in production
     _check_secret_keys(app)
 
@@ -107,6 +119,7 @@ def create_app(config_class=Config):
     from app.routes.auth import auth_bp
     from app.routes.resume import resume_bp
     from app.routes.subscription import subscription_bp
+    from app.services.email_service import email_bp
     from app.socket_events import register_socket_handlers
 
     app.register_blueprint(interview_bp, url_prefix='/api/interview')
@@ -114,6 +127,7 @@ def create_app(config_class=Config):
     app.register_blueprint(auth_bp, url_prefix='/api/auth')
     app.register_blueprint(resume_bp, url_prefix='/api/resume')
     app.register_blueprint(subscription_bp, url_prefix='/api/subscription')
+    app.register_blueprint(email_bp)
 
     # Register Socket.IO event handlers for real-time dashboard updates.
     register_socket_handlers()

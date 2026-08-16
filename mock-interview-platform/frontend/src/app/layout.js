@@ -3,6 +3,7 @@ import { GoogleAnalytics, GoogleTagManager } from '@next/third-parties/google';
 import { Toaster } from 'react-hot-toast';
 import { Analytics } from '@vercel/analytics/next';
 import { SITE_URL } from './site';
+import CookieBanner from '../components/CookieBanner';
 
 export const metadata = {
   metadataBase: new URL(SITE_URL),
@@ -70,8 +71,22 @@ export default function RootLayout({ children }) {
       <head>
         <meta name="apple-mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+        <script dangerouslySetInnerHTML={{
+          __html: `
+            (function() {
+              try {
+                const savedTheme = localStorage.getItem('theme-preference');
+                const prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+                const shouldUseDark = savedTheme === 'dark' || (!savedTheme && prefersDark);
+                document.documentElement.classList.toggle('dark', shouldUseDark);
+              } catch (e) {
+                document.documentElement.classList.remove('dark');
+              }
+            })();
+          `,
+        }} />
       </head>
-      <body className="font-sans antialiased bg-white text-gray-900">
+      <body className="font-sans antialiased bg-white text-gray-900 transition-colors duration-200 dark:bg-slate-950 dark:text-slate-100">
         {/* Google Tag Manager (noscript) */}
         <noscript dangerouslySetInnerHTML={{
           __html: '<iframe src="https://www.googletagmanager.com/ns.html?id=GT-NB3Z6ML3" height="0" width="0" style="display:none;visibility:hidden"></iframe>',
@@ -82,6 +97,7 @@ export default function RootLayout({ children }) {
         {children}
         <Toaster position="top-right" reverseOrder={false} />
         <Analytics />
+        <CookieBanner />
       </body>
     </html>
   );

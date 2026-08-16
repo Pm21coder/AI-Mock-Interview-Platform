@@ -71,18 +71,18 @@ export default function InterviewSetup() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-gray-50 transition-colors duration-200 dark:bg-slate-950">
       <Navigation />
 
       <div className="container mx-auto max-w-3xl px-4 py-12">
         <div className="mb-8 text-center">
-          <h1 className="text-3xl font-bold text-gray-900">Setup Your Mock Interview</h1>
-          <p className="mt-2 text-gray-600">
+          <h1 className="text-3xl font-bold text-gray-900 dark:text-slate-100">Setup Your Mock Interview</h1>
+          <p className="mt-2 text-gray-600 dark:text-slate-300">
             Configure your interview settings and start practicing with AI-powered feedback.
           </p>
         </div>
 
-        <div className="rounded-xl bg-white p-8 shadow-lg">
+        <div className="rounded-xl border border-slate-200 bg-white p-8 shadow-lg transition-colors duration-200 dark:border-slate-700 dark:bg-slate-900">
           <form onSubmit={handleSubmit} className="space-y-6">
             <div>
               <label className="mb-2 block text-sm font-medium text-gray-700">Job Role *</label>

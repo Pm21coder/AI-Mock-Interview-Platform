@@ -50,17 +50,17 @@ export default function AuthPage() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-gray-50 transition-colors duration-200 dark:bg-slate-950">
       <Navigation />
       <main className="container mx-auto flex min-h-[calc(100vh-64px)] items-center justify-center px-4 py-12">
         <div className="w-full max-w-md">
-          <div className="rounded-xl bg-white p-8 shadow-lg">
+          <div className="rounded-xl border border-slate-200 bg-white p-8 shadow-lg transition-colors duration-200 dark:border-slate-700 dark:bg-slate-900">
             <div className="mb-6 text-center">
               <div className="mb-4 text-4xl">🔐</div>
-              <h1 className="text-2xl font-bold text-gray-900">
+              <h1 className="text-2xl font-bold text-gray-900 dark:text-slate-100">
                 {isRegistering ? 'Create an account' : 'Welcome back'}
               </h1>
-              <p className="mt-2 text-sm text-gray-600">
+              <p className="mt-2 text-sm text-gray-600 dark:text-slate-300">
                 Save interview activity when a database is configured, or use the app in practice mode.
               </p>
             </div>

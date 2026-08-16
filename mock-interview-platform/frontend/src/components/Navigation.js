@@ -11,25 +11,47 @@ const navigationLinks = [
   { href: '/interview/setup', label: 'New Interview' },
   { href: '/resume', label: 'Resume Analyzer' },
   { href: '/subscription', label: 'Pricing' },
+  { href: '/contact', label: 'Contact' },
+];
+
+const themeOptions = [
+  { key: 'light', label: 'Light' },
+  { key: 'dark', label: 'Dark' },
+  { key: 'gradient-pink', label: 'Gradient Pink' },
 ];
 
 export default function Navigation() {
   const router = useRouter();
   const { email, logout } = useAuth();
   const [isMenuOpen, setIsMenuOpen] = useState(false);
-  const [darkMode, setDarkMode] = useState(false);
+  const [theme, setTheme] = useState('light');
 
   useEffect(() => {
-    const savedTheme = window.localStorage.getItem('theme-preference');
-    const isDark = savedTheme === 'dark';
-    setDarkMode(isDark);
-    document.documentElement.classList.toggle('dark', isDark);
+    const updateTheme = () => {
+      const savedTheme = window.localStorage.getItem('theme-preference') || 'light';
+      const nextTheme = themeOptions.some((option) => option.key === savedTheme) ? savedTheme : 'light';
+      setTheme(nextTheme);
+      document.documentElement.setAttribute('data-theme', nextTheme);
+      document.documentElement.classList.toggle('dark', nextTheme === 'dark');
+    };
+
+    updateTheme();
+    window.addEventListener('storage', updateTheme);
+    window.addEventListener('theme-preference-changed', updateTheme);
+
+    return () => {
+      window.removeEventListener('storage', updateTheme);
+      window.removeEventListener('theme-preference-changed', updateTheme);
+    };
   }, []);
 
-  useEffect(() => {
-    document.documentElement.classList.toggle('dark', darkMode);
-    window.localStorage.setItem('theme-preference', darkMode ? 'dark' : 'light');
-  }, [darkMode]);
+  const applyTheme = useCallback((nextTheme) => {
+    setTheme(nextTheme);
+    document.documentElement.setAttribute('data-theme', nextTheme);
+    document.documentElement.classList.toggle('dark', nextTheme === 'dark');
+    window.localStorage.setItem('theme-preference', nextTheme);
+    window.dispatchEvent(new CustomEvent('theme-preference-changed'));
+  }, []);
 
   const signOut = useCallback(() => {
     disconnectSocket();
@@ -42,15 +64,17 @@ export default function Navigation() {
     setIsMenuOpen(false);
   }, []);
 
-  const navClass = darkMode
+  const isDarkTheme = theme === 'dark' || theme === 'midnight';
+
+  const navClass = isDarkTheme
     ? 'sticky top-0 z-50 w-full border-b border-white/10 bg-slate-950/80 text-white shadow-lg shadow-slate-950/30 backdrop-blur-xl'
     : 'sticky top-0 z-50 w-full border-b border-slate-200 bg-white/80 text-slate-900 shadow-sm backdrop-blur-xl';
 
-  const linkClass = darkMode
+  const linkClass = isDarkTheme
     ? 'rounded-md px-3 py-2 text-sm font-medium text-slate-200 transition-colors hover:bg-white/5 hover:text-white lg:px-4 lg:py-2'
     : 'rounded-md px-3 py-2 text-sm font-medium text-gray-600 transition-colors hover:bg-gray-50 hover:text-gray-900 lg:px-4 lg:py-2';
 
-  const buttonBase = darkMode
+  const buttonBase = isDarkTheme
     ? 'rounded-xl bg-gradient-to-r from-blue-500 to-violet-500 px-4 py-2 text-sm font-medium text-white shadow-lg shadow-blue-500/20 transition hover:brightness-110'
     : 'rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-lg shadow-blue-500/20 transition hover:brightness-110';
 
@@ -68,28 +92,41 @@ export default function Navigation() {
 
           <div className="hidden items-center gap-1 md:flex lg:gap-2">
             {navigationLinks.map((link) => (
-              <Link key={link.href} href={link.href} className={linkClass}>
-                {link.label}
-              </Link>
+              link.href !== '/contact' && (
+                <Link key={link.href} href={link.href} className={linkClass}>
+                  {link.label}
+                </Link>
+              )
             ))}
+            <Link href="/contact" className={buttonBase}>
+              Contact Us
+            </Link>
           </div>
 
           <div className="hidden items-center gap-3 md:flex">
-            <button
-              type="button"
-              onClick={() => setDarkMode((prev) => !prev)}
-              className={darkMode
-                ? 'inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-2 text-xs font-semibold uppercase tracking-[0.12em] text-slate-200 transition hover:bg-white/10'
-                : 'inline-flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-semibold uppercase tracking-[0.12em] text-slate-700 transition hover:bg-slate-100'}
-              aria-label="Toggle color theme"
-            >
-              <span>{darkMode ? '☀️' : '🌙'}</span>
-              {darkMode ? 'Light' : 'Dark'}
-            </button>
+            <div className={isDarkTheme ? 'flex items-center gap-1 rounded-full border border-white/10 bg-white/5 p-1' : 'flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 p-1'}>
+              {themeOptions.map((option) => (
+                <button
+                  key={option.key}
+                  type="button"
+                  onClick={() => applyTheme(option.key)}
+                  className={
+                    theme === option.key
+                      ? 'rounded-full bg-gradient-to-r from-blue-600 to-violet-600 px-2.5 py-1.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-white shadow-sm'
+                      : isDarkTheme
+                        ? 'rounded-full px-2.5 py-1.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-300 transition hover:bg-white/5'
+                        : 'rounded-full px-2.5 py-1.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-600 transition hover:bg-slate-100'
+                  }
+                  aria-label={`Set theme to ${option.label}`}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
 
             {email ? (
               <>
-                <span className={darkMode ? 'rounded-md px-3 py-2 text-sm text-slate-300' : 'rounded-md px-3 py-2 text-sm text-gray-600'}>
+                <span className={isDarkTheme ? 'rounded-md px-3 py-2 text-sm text-slate-300' : 'rounded-md px-3 py-2 text-sm text-gray-600'}>
                   {email}
                 </span>
                 <button onClick={signOut} className={buttonBase}>
@@ -104,20 +141,29 @@ export default function Navigation() {
           </div>
 
           <div className="flex items-center gap-2 md:hidden">
-            <button
-              type="button"
-              onClick={() => setDarkMode((prev) => !prev)}
-              className={darkMode
-                ? 'inline-flex h-10 w-10 items-center justify-center rounded-full border border-white/10 bg-white/5 text-lg'
-                : 'inline-flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 bg-slate-50 text-lg'}
-              aria-label="Toggle color theme"
-            >
-              {darkMode ? '☀️' : '🌙'}
-            </button>
+            <div className={isDarkTheme ? 'flex items-center gap-1 rounded-full border border-white/10 bg-white/5 p-1' : 'flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 p-1'}>
+              {themeOptions.slice(0, 2).map((option) => (
+                <button
+                  key={option.key}
+                  type="button"
+                  onClick={() => applyTheme(option.key)}
+                  className={
+                    theme === option.key
+                      ? 'rounded-full bg-gradient-to-r from-blue-600 to-violet-600 px-2 py-1 text-[9px] font-semibold uppercase tracking-[0.12em] text-white'
+                      : isDarkTheme
+                        ? 'rounded-full px-2 py-1 text-[9px] font-semibold uppercase tracking-[0.12em] text-slate-300'
+                        : 'rounded-full px-2 py-1 text-[9px] font-semibold uppercase tracking-[0.12em] text-slate-600'
+                  }
+                  aria-label={`Set theme to ${option.label}`}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
 
             <button
               onClick={() => setIsMenuOpen(!isMenuOpen)}
-              className={darkMode ? 'inline-flex h-10 w-10 items-center justify-center rounded-md text-slate-200 hover:bg-white/5' : 'inline-flex h-10 w-10 items-center justify-center rounded-md text-gray-600 hover:bg-gray-100'}
+              className={isDarkTheme ? 'inline-flex h-10 w-10 items-center justify-center rounded-md text-slate-200 hover:bg-white/5' : 'inline-flex h-10 w-10 items-center justify-center rounded-md text-gray-600 hover:bg-gray-100'}
               aria-expanded={isMenuOpen}
               aria-label="Toggle navigation menu"
             >
@@ -135,7 +181,7 @@ export default function Navigation() {
                 <Link
                   key={link.href}
                   href={link.href}
-                  className={darkMode ? 'block rounded-md px-3 py-2 text-base font-medium text-slate-200 hover:bg-white/5 hover:text-white' : 'block rounded-md px-3 py-2 text-base font-medium text-gray-600 hover:bg-gray-50 hover:text-gray-900'}
+                  className={isDarkTheme ? 'block rounded-md px-3 py-2 text-base font-medium text-slate-200 hover:bg-white/5 hover:text-white' : 'block rounded-md px-3 py-2 text-base font-medium text-gray-600 hover:bg-gray-50 hover:text-gray-900'}
                   onClick={closeMenu}
                 >
                   {link.label}
@@ -143,10 +189,10 @@ export default function Navigation() {
               ))}
             </div>
 
-            <div className={darkMode ? 'space-y-2 border-t border-white/10 px-2 py-3' : 'space-y-2 border-t border-gray-200 px-2 py-3'}>
+            <div className={isDarkTheme ? 'space-y-2 border-t border-white/10 px-2 py-3' : 'space-y-2 border-t border-gray-200 px-2 py-3'}>
               {email ? (
                 <>
-                  <p className={darkMode ? 'px-3 py-2 text-sm text-slate-300' : 'px-3 py-2 text-sm text-gray-600'}>{email}</p>
+                  <p className={isDarkTheme ? 'px-3 py-2 text-sm text-slate-300' : 'px-3 py-2 text-sm text-gray-600'}>{email}</p>
                   <button
                     onClick={signOut}
                     className="w-full rounded-lg bg-gradient-to-r from-blue-600 to-indigo-600 px-4 py-2 text-sm font-medium text-white transition hover:brightness-110"

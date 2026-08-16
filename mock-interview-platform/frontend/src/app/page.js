@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, lazy, Suspense } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
 import Navigation from '../components/Navigation';
@@ -12,6 +12,33 @@ const stats = [
 ];
 
 export default function Home() {
+  const [theme, setTheme] = useState('light');
+
+  const scrollToHowItWorks = (event) => {
+    const target = document.getElementById('how-it-works');
+    if (!target) return;
+
+    event.preventDefault();
+    target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
+
+  useEffect(() => {
+    const syncTheme = () => {
+      const savedTheme = window.localStorage.getItem('theme-preference') || 'light';
+      const nextTheme = ['light', 'dark', 'gradient-pink'].includes(savedTheme) ? savedTheme : 'light';
+      setTheme(nextTheme);
+      document.documentElement.setAttribute('data-theme', nextTheme);
+      document.documentElement.classList.toggle('dark', nextTheme === 'dark');
+    };
+
+    syncTheme();
+    window.addEventListener('theme-preference-changed', syncTheme);
+
+    return () => {
+      window.removeEventListener('theme-preference-changed', syncTheme);
+    };
+  }, []);
+
   useEffect(() => {
     const revealElements = document.querySelectorAll('.reveal-card');
 
@@ -31,6 +58,20 @@ export default function Home() {
     return () => observer.disconnect();
   }, []);
 
+  const themeOptions = [
+    { key: 'light', label: 'Light' },
+    { key: 'dark', label: 'Dark' },
+    { key: 'gradient-pink', label: 'Gradient Pink' },
+  ];
+
+  const applyTheme = (nextTheme) => {
+    setTheme(nextTheme);
+    document.documentElement.setAttribute('data-theme', nextTheme);
+    document.documentElement.classList.toggle('dark', nextTheme === 'dark');
+    window.localStorage.setItem('theme-preference', nextTheme);
+    window.dispatchEvent(new CustomEvent('theme-preference-changed'));
+  };
+
   return (
     <div className="page-shell min-h-screen overflow-x-hidden">
       <Navigation />
@@ -39,16 +80,36 @@ export default function Home() {
         <section className="relative py-10 sm:py-14 lg:py-20">
           <div className="grid items-center gap-8 lg:grid-cols-[1.05fr_0.95fr] lg:gap-12">
             <div className="relative z-10 text-center lg:text-left">
-              <span className="inline-flex items-center gap-2 rounded-full border border-blue-200 bg-white/80 px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.18em] text-blue-700 shadow-sm backdrop-blur sm:text-sm">
-                <span className="h-2 w-2 rounded-full bg-emerald-400" />
-                AI mock interview coach
-              </span>
+              <div className="flex flex-col items-center gap-3 sm:flex-row sm:justify-center lg:justify-start">
+                <span className="inline-flex items-center gap-2 rounded-full border border-blue-200 bg-white/80 px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.18em] text-blue-700 shadow-sm backdrop-blur sm:text-sm dark:border-blue-500/30 dark:bg-slate-900/70 dark:text-blue-200">
+                  <span className="h-2 w-2 rounded-full bg-emerald-400" />
+                  AI mock interview coach
+                </span>
 
-              <h1 className="mt-5 text-balance text-4xl font-black leading-[1.05] tracking-tight text-slate-900 xs:text-[2.8rem] sm:text-5xl lg:text-6xl">
+                <div className="flex flex-wrap items-center justify-center gap-2 rounded-full border border-slate-200 bg-white/80 p-1 shadow-sm dark:border-slate-700 dark:bg-slate-900/70">
+                  {themeOptions.map((option) => (
+                    <button
+                      key={option.key}
+                      type="button"
+                      onClick={() => applyTheme(option.key)}
+                      className={
+                        theme === option.key
+                          ? 'rounded-full bg-gradient-to-r from-blue-600 to-violet-600 px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-white'
+                          : 'rounded-full px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-600 transition hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800'
+                      }
+                      aria-label={`Set theme to ${option.label}`}
+                    >
+                      {option.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <h1 className="mt-5 text-balance text-4xl font-black leading-[1.05] tracking-tight text-slate-900 xs:text-[2.8rem] sm:text-5xl lg:text-6xl dark:text-slate-100">
                 Practice interviews with <span className="gradient-text">real confidence</span>
               </h1>
 
-              <p className="mx-auto mt-5 max-w-xl text-base leading-7 text-slate-600 sm:text-lg lg:mx-0">
+              <p className="mx-auto mt-5 max-w-xl text-base leading-7 text-slate-600 sm:text-lg lg:mx-0 dark:text-slate-300">
                 Simulate real job interviews with AI-generated questions, live feedback, and polished guidance that helps you improve every answer.
               </p>
 
@@ -62,7 +123,8 @@ export default function Home() {
                 </Link>
                 <Link
                   href="#how-it-works"
-                  className="inline-flex w-full items-center justify-center rounded-2xl border border-slate-200 bg-white/80 px-6 py-3.5 text-base font-semibold text-slate-700 shadow-sm transition-all duration-200 hover:border-slate-300 hover:bg-white sm:w-auto"
+                  onClick={scrollToHowItWorks}
+                  className="inline-flex w-full items-center justify-center rounded-2xl border border-slate-200 bg-white/80 px-6 py-3.5 text-base font-semibold text-slate-700 shadow-sm transition-all duration-200 hover:border-slate-300 hover:bg-white sm:w-auto dark:border-slate-700 dark:bg-slate-900/70 dark:text-slate-200 dark:hover:bg-slate-800"
                 >
                   See how it works
                 </Link>
@@ -70,9 +132,9 @@ export default function Home() {
 
               <div className="mt-8 grid gap-3 sm:grid-cols-3">
                 {stats.map((stat) => (
-                  <div key={stat.label} className="rounded-2xl border border-slate-200 bg-white/80 p-3 shadow-soft backdrop-blur-sm">
-                    <div className="text-xl font-black text-slate-900 sm:text-2xl">{stat.value}</div>
-                    <div className="mt-1 text-xs text-slate-600 sm:text-sm">{stat.label}</div>
+                  <div key={stat.label} className="rounded-2xl border border-slate-200 bg-white/80 p-3 shadow-soft backdrop-blur-sm dark:border-slate-700 dark:bg-slate-900/70">
+                    <div className="text-xl font-black text-slate-900 sm:text-2xl dark:text-slate-100">{stat.value}</div>
+                    <div className="mt-1 text-xs text-slate-600 sm:text-sm dark:text-slate-300">{stat.label}</div>
                   </div>
                 ))}
               </div>
@@ -147,8 +209,8 @@ export default function Home() {
 
         <section className="py-8 sm:py-10 lg:py-16">
           <div className="mb-6 text-center sm:mb-8">
-            <p className="text-sm font-semibold uppercase tracking-[0.18em] text-blue-600">Why people choose us</p>
-            <h2 className="mt-3 text-3xl font-black text-slate-900 sm:text-4xl">Practice smarter, not harder.</h2>
+            <p className="text-sm font-semibold uppercase tracking-[0.18em] text-blue-600 dark:text-blue-400">Why people choose us</p>
+            <h2 className="mt-3 text-3xl font-black text-slate-900 sm:text-4xl dark:text-slate-100">Practice smarter, not harder.</h2>
           </div>
 
           <div className="grid gap-5 md:grid-cols-3">
@@ -226,8 +288,8 @@ export default function Home() {
         </section>
       </main>
 
-      <footer className="mt-12 border-t border-slate-200 bg-white/80 backdrop-blur-sm sm:mt-16">
-        <div className="mx-auto max-w-7xl px-3 py-8 text-center text-sm text-slate-600 xs:px-4 sm:px-6 lg:px-8">
+      <footer className="mt-12 border-t border-slate-200 bg-white/80 backdrop-blur-sm sm:mt-16 dark:border-slate-700 dark:bg-slate-950/70">
+        <div className="mx-auto max-w-7xl px-3 py-8 text-center text-sm text-slate-600 xs:px-4 sm:px-6 lg:px-8 dark:text-slate-300">
           © {new Date().getFullYear()} MockInterview AI. All rights reserved.
         </div>
       </footer>
