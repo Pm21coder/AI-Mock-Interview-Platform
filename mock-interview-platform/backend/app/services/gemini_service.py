@@ -109,7 +109,7 @@ class GeminiService:
         for model_name in self.model_candidates_list:
             try:
                 if self.use_new_sdk and self.client:
-                    # Use new google.genai SDK with timeout
+                    # Use the google.genai SDK with the supported argument shape.
                     response = self.client.models.generate_content(
                         model=f'models/{model_name}',
                         contents=prompt,
@@ -118,7 +118,6 @@ class GeminiService:
                             max_output_tokens=max_output_tokens,
                             temperature=0.3,
                         ),
-                        request_options={'timeout': Config.GEMINI_TIMEOUT_SECONDS},
                     )
                     text = self._extract_response_text_new_sdk(response)
                 else:
@@ -132,7 +131,6 @@ class GeminiService:
                             max_output_tokens=max_output_tokens,
                             temperature=0.3,
                         ),
-                        request_options={'timeout': Config.GEMINI_TIMEOUT_SECONDS},
                     )
                     text = self._extract_response_text(response)
                 
