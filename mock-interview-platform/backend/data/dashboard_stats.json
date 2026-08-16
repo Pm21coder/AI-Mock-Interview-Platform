@@ -1,19 +1,12 @@
 {
   "demo_c6ce5ebf-4fe0-401b-b4eb-8e3987955f2b": {
     "user_id": "demo_c6ce5ebf-4fe0-401b-b4eb-8e3987955f2b",
-    "interviews_completed": 1,
-    "average_score": 69,
-    "confidence_score": 75,
-    "total_responses": 6,
-    "recent_interviews": [
-      {
-        "role": "Data analyst",
-        "score": 69,
-        "date": "2026-08-16T08:11:29.610750",
-        "confidence": 75
-      }
-    ],
-    "updated_at": "2026-08-16 08:17:53.239357",
-    "history_synced_at": "2026-08-16 08:17:53.239357"
+    "interviews_completed": 0,
+    "average_score": 0,
+    "confidence_score": 0,
+    "total_responses": 0,
+    "recent_interviews": [],
+    "updated_at": "2026-08-16 11:42:14.131023",
+    "history_synced_at": "2026-08-16 11:42:14.131023"
   }
 }
