@@ -55,43 +55,42 @@ class DashboardService:
             pass
 
     def get_stats(self, user_id):
-        """Return the persisted dashboard stats for a user, or None."""
+        """Return the persisted dashboard stats for a user from MongoDB or JSON fallback."""
         try:
             # Check short-lived cache first to avoid repeated expensive DB reads
             cache_entry = self._cache.get(user_id)
             if cache_entry:
                 cached_value, ts = cache_entry
-                # The cache is the source of truth in local fallback mode. Do
-                # not discard a completed interview merely because its entry
-                # is older than the normal database-backed cache TTL.
-                if not current_app.config.get('MONGO_AVAILABLE', True):
-                    return cached_value
+                # Only use cache if still valid (5-second TTL)
                 if (utc_now() - ts).total_seconds() < self._cache_ttl_seconds:
                     return cached_value
 
-            # If Mongo is known to be unavailable, avoid touching the client.
-            if not current_app.config.get('MONGO_AVAILABLE', True):
+            # Try MongoDB first (primary source)
+            if current_app.config.get('MONGO_AVAILABLE', True):
+                try:
+                    doc = mongo.db[self.COLLECTION].find_one({'user_id': user_id})
+                    if doc:
+                        stats = DashboardStats.from_dict(doc)
+                        self._cache[user_id] = (stats, utc_now())
+                        return stats
+                except Exception as exc:
+                    print(f'DashboardService.get_stats MongoDB error: {exc}')
+                    # Fall through to JSON fallback below
+
+            # Fall back to JSON file if MongoDB not available or no data found
+            try:
                 payload = self._load_fallback_stats()
                 doc = payload.get(str(user_id))
                 if doc:
                     stats = DashboardStats.from_dict(doc)
                     self._cache[user_id] = (stats, utc_now())
                     return stats
-                return None
+            except Exception as exc:
+                print(f'DashboardService.get_stats JSON fallback error: {exc}')
 
-            doc = mongo.db[self.COLLECTION].find_one({'user_id': user_id})
-            if doc:
-                stats = DashboardStats.from_dict(doc)
-                # Update cache
-                self._cache[user_id] = (stats, utc_now())
-                return stats
         except Exception as exc:
             print(f'DashboardService.get_stats error: {exc}')
-            try:
-                # Mark Mongo as unavailable to avoid repeated timeouts
-                current_app.config['MONGO_AVAILABLE'] = False
-            except Exception:
-                pass
+
         return None
 
     def get_or_create_stats(self, user_id):
@@ -109,25 +108,35 @@ class DashboardService:
     # ------------------------------------------------------------------
 
     def save_stats(self, stats):
-        """Upsert the given DashboardStats document."""
-        if not current_app.config.get('MONGO_AVAILABLE', True):
+        """Upsert the given DashboardStats document to both MongoDB and fallback JSON file."""
+        stats_dict = stats.to_dict()
+        
+        # Always save to fallback JSON file for redundancy, even if MongoDB is available
+        try:
             payload = self._load_fallback_stats()
-            payload[str(stats.user_id)] = stats.to_dict()
+            payload[str(stats.user_id)] = stats_dict
             self._save_fallback_stats(payload)
+        except Exception as exc:
+            print(f'DashboardService.save_stats JSON fallback error: {exc}')
+        
+        # Also try to save to MongoDB if available
+        if not current_app.config.get('MONGO_AVAILABLE', True):
             self._cache[stats.user_id] = (stats, utc_now())
             return True
 
         try:
-            doc = stats.to_dict()
             mongo.db[self.COLLECTION].update_one(
                 {'user_id': stats.user_id},
-                {'$set': doc},
+                {'$set': stats_dict},
                 upsert=True,
             )
+            self._cache[stats.user_id] = (stats, utc_now())
             return True
         except Exception as exc:
-            print(f'DashboardService.save_stats error: {exc}')
-            return False
+            print(f'DashboardService.save_stats MongoDB error: {exc}')
+            # Fallback was already saved above, so mark as successful
+            self._cache[stats.user_id] = (stats, utc_now())
+            return True
 
     def update_after_interview(self, user_id, interview):
         """Incrementally update a user's stats after an interview completes.

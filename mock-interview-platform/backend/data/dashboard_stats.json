@@ -1,12 +1,37 @@
 {
   "demo_c6ce5ebf-4fe0-401b-b4eb-8e3987955f2b": {
     "user_id": "demo_c6ce5ebf-4fe0-401b-b4eb-8e3987955f2b",
-    "interviews_completed": 0,
-    "average_score": 0,
-    "confidence_score": 0,
-    "total_responses": 0,
-    "recent_interviews": [],
-    "updated_at": "2026-08-16 14:24:05.958117",
-    "history_synced_at": "2026-08-16 14:24:05.958117"
+    "interviews_completed": 4,
+    "average_score": 88,
+    "confidence_score": 75,
+    "total_responses": 20,
+    "recent_interviews": [
+      {
+        "role": "Digital marketing associate",
+        "score": 85,
+        "date": "2026-08-16T14:58:17.487888",
+        "confidence": 75
+      },
+      {
+        "role": "Air Hostess",
+        "score": 88,
+        "date": "2026-08-16T14:51:43.021792",
+        "confidence": 75
+      },
+      {
+        "role": "Security Advisor",
+        "score": 98,
+        "date": "2026-08-16T14:45:43.393682",
+        "confidence": 75
+      },
+      {
+        "role": "human resource manager",
+        "score": 93,
+        "date": "2026-08-16T14:39:24.325710",
+        "confidence": 75
+      }
+    ],
+    "updated_at": "2026-08-16 15:05:26.441367",
+    "history_synced_at": "2026-08-16 15:05:26.441367"
   }
 }
