@@ -68,7 +68,6 @@ export default function RootLayout({ children }) {
   return (
     <html lang="en" data-scroll-behavior="smooth" suppressHydrationWarning>
       <head>
-        <script id="Cookiebot" src="https://consent.cookiebot.com/uc.js" data-cbid="14c3d677-3235-4db8-a6ac-71c42d55f64c" type="text/javascript" async></script>
         <meta name="apple-mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
       </head>
