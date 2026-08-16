@@ -5,24 +5,23 @@ import { useRouter } from 'next/navigation';
 import toast from 'react-hot-toast';
 import Navigation from '../../components/Navigation';
 import { login, register } from '../../utils/api';
+import { useAuth } from '../../hooks/useAuth';
 
 export default function AuthPage() {
   const router = useRouter();
+  const { isAuthenticated, login: storeAuth } = useAuth();
   const [isRegistering, setIsRegistering] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
-    if (typeof window !== 'undefined') {
-      const token = window.localStorage.getItem('auth_token');
-      if (token) {
-        const params = new URLSearchParams(window.location.search);
-        const nextPath = params.get('next');
-        router.push(nextPath?.startsWith('/') ? nextPath : '/interview/setup');
-      }
+    if (isAuthenticated) {
+      const params = new URLSearchParams(window.location.search);
+      const nextPath = params.get('next');
+      router.push(nextPath?.startsWith('/') ? nextPath : '/interview/setup');
     }
-  }, [router]);
+  }, [isAuthenticated, router]);
 
   const submit = async (event) => {
     event.preventDefault();
@@ -38,9 +37,7 @@ export default function AuthPage() {
     setIsSubmitting(true);
     try {
       const result = await (isRegistering ? register : login)({ email, password });
-      window.localStorage.setItem('auth_token', result.token);
-      window.localStorage.setItem('auth_email', result.user.email);
-      window.dispatchEvent(new Event('auth-change'));
+      storeAuth(result.token, result.user.email);
       toast.success(isRegistering ? 'Account created.' : 'Signed in successfully.');
       const params = new URLSearchParams(window.location.search);
       const nextPath = params.get('next');

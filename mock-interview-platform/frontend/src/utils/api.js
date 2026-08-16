@@ -31,6 +31,28 @@ function setCachedData(key, data, ttl = CACHE_TTL.default) {
   });
 }
 
+function clearCacheForKey(key) {
+  apiCache.delete(key);
+}
+
+export function invalidateQuestionCategoriesCache() {
+  const cacheKey = getCacheKey('GET', '/api/subscription/question-categories');
+  clearCacheForKey(cacheKey);
+}
+
+/**
+ * Clear all subscription-related caches.
+ * Called after auth changes or when subscription is updated.
+ */
+export function invalidateAllSubscriptionCaches() {
+  // Clear localStorage subscription cache
+  if (typeof window !== 'undefined') {
+    window.localStorage.removeItem('subscription_data');
+  }
+  // Clear API response caches
+  invalidateQuestionCategoriesCache();
+}
+
 const api = axios.create({
   baseURL: process.env.NEXT_PUBLIC_API_URL || '',
   headers: {

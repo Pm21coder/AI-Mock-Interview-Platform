@@ -3,30 +3,8 @@
 import { useState, useEffect, useCallback, useSyncExternalStore } from 'react';
 import Navigation from '../../components/Navigation';
 import { getDashboardStats } from '../../utils/api';
+import { useDisplayName } from '../../hooks/useAuth';
 import { onSocketEvent, emitSocketEvent } from '../../utils/socket';
-
-function getDisplayName(email) {
-  const localPart = email?.split('@')[0] || '';
-  return localPart
-    .split(/[._-]+/)
-    .filter(Boolean)
-    .map((part) => `${part.charAt(0).toUpperCase()}${part.slice(1)}`)
-    .join(' ');
-}
-
-function getUsernameSnapshot() {
-  if (typeof window === 'undefined') return '';
-  return getDisplayName(window.localStorage.getItem('auth_email'));
-}
-
-function subscribeToAuthChanges(callback) {
-  window.addEventListener('storage', callback);
-  window.addEventListener('auth-change', callback);
-  return () => {
-    window.removeEventListener('storage', callback);
-    window.removeEventListener('auth-change', callback);
-  };
-}
 
 export default function DashboardPage() {
   const [stats, setStats] = useState({ interviews_completed: 0, average_score: 0, confidence_score: 0 });
@@ -37,7 +15,7 @@ export default function DashboardPage() {
   const [liveUpdate, setLiveUpdate] = useState(false);
   const [isFallbackData, setIsFallbackData] = useState(false);
   const [retrying, setRetrying] = useState(false);
-  const username = useSyncExternalStore(subscribeToAuthChanges, getUsernameSnapshot, () => '');
+  const username = useDisplayName();
 
   const fetchDashboardData = useCallback(async () => {
     try {

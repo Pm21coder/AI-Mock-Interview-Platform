@@ -2,23 +2,9 @@
 
 import Link from 'next/link';
 import { useState, useCallback, useEffect } from 'react';
-import { useSyncExternalStore } from 'react';
 import { useRouter } from 'next/navigation';
+import { useAuth } from '../hooks/useAuth';
 import { disconnectSocket } from '../utils/socket';
-
-const authStore = {
-  getSnapshot: () => window.localStorage.getItem('auth_email') || '',
-  subscribe: (callback) => {
-    window.addEventListener('storage', callback);
-    window.addEventListener('auth-change', callback);
-    return () => {
-      window.removeEventListener('storage', callback);
-      window.removeEventListener('auth-change', callback);
-    };
-  },
-};
-
-const getServerAuthEmail = () => '';
 
 const navigationLinks = [
   { href: '/dashboard', label: 'Dashboard' },
@@ -29,7 +15,7 @@ const navigationLinks = [
 
 export default function Navigation() {
   const router = useRouter();
-  const email = useSyncExternalStore(authStore.subscribe, authStore.getSnapshot, getServerAuthEmail);
+  const { email, logout } = useAuth();
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [darkMode, setDarkMode] = useState(false);
 
@@ -47,13 +33,10 @@ export default function Navigation() {
 
   const signOut = useCallback(() => {
     disconnectSocket();
-
-    window.localStorage.removeItem('auth_token');
-    window.localStorage.removeItem('auth_email');
-    window.dispatchEvent(new Event('auth-change'));
+    logout();
     setIsMenuOpen(false);
     router.push('/');
-  }, [router]);
+  }, [router, logout]);
 
   const closeMenu = useCallback(() => {
     setIsMenuOpen(false);

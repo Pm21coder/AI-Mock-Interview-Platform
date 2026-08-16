@@ -5,9 +5,11 @@ import { useRouter } from 'next/navigation';
 import Navigation from '../../../components/Navigation';
 import toast from 'react-hot-toast';
 import { getQuestionCategories } from '../../../utils/api';
+import { useSubscription } from '../../../hooks/useSubscription';
 
 export default function InterviewSetup() {
   const router = useRouter();
+  const { subscription, loading: subscriptionLoading, refetch } = useSubscription();
   const [availableCategories, setAvailableCategories] = useState(['technical', 'behavioral']);
   const [loadingCategories, setLoadingCategories] = useState(true);
   const [planDetails, setPlanDetails] = useState({
@@ -47,7 +49,8 @@ export default function InterviewSetup() {
     };
 
     fetchCategories();
-  }, []);
+  }, [subscription]); // Re-fetch when subscription changes
+
 
   const handleSubmit = (e) => {
     e.preventDefault();

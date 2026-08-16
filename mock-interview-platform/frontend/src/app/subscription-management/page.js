@@ -5,8 +5,8 @@ import { useRouter } from 'next/navigation';
 import Navigation from '../../components/Navigation';
 import AdvancedAnalyticsDashboard from '../../components/AdvancedAnalyticsDashboard';
 import EmailSupportWidget from '../../components/EmailSupportWidget';
+import { useSubscription } from '../../hooks/useSubscription';
 import {
-  getSubscriptionStatus,
   getUsageStats,
   getBillingHistory,
   getAvailableFeatures,
@@ -17,7 +17,7 @@ import {
 
 export default function SubscriptionManagementPage() {
   const router = useRouter();
-  const [subscription, setSubscription] = useState(null);
+  const { subscription, loading: subscriptionLoading, refetch: refetchSubscription } = useSubscription();
   const [usageStats, setUsageStats] = useState(null);
   const [billingHistory, setBillingHistory] = useState([]);
   const [features, setFeatures] = useState({});
@@ -34,20 +34,13 @@ export default function SubscriptionManagementPage() {
         setLoading(true);
         setError(null);
 
-        const [subData, statsData, historyData, featuresData, categoriesData, historyLimitData] = await Promise.all([
-          getSubscriptionStatus(),
+        const [statsData, historyData, featuresData, categoriesData, historyLimitData] = await Promise.all([
           getUsageStats(),
           getBillingHistory(),
           getAvailableFeatures(),
           getQuestionCategories().catch(() => null),
           getFeedbackHistoryLimit().catch(() => null),
         ]);
-
-        if (subData.error) {
-          setError('Failed to load subscription data');
-        } else {
-          setSubscription(subData);
-        }
 
         if (statsData && !statsData.error) {
           setUsageStats(statsData);
@@ -77,16 +70,15 @@ export default function SubscriptionManagementPage() {
     };
 
     fetchData();
-  }, []);
+  }, [subscription]); // Refetch other data when subscription changes
 
   const handleCancelSubscription = async () => {
     try {
       setCancelLoading(true);
       await cancelSubscription();
       setShowCancelConfirm(false);
-      // Refresh subscription data
-      const updatedSub = await getSubscriptionStatus();
-      setSubscription(updatedSub);
+      // Refresh subscription data from cache
+      await refetchSubscription();
       alert('Subscription cancelled successfully');
     } catch (err) {
       setError(err.response?.data?.error || 'Failed to cancel subscription');

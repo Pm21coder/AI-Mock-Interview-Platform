@@ -7,7 +7,9 @@ import Navigation from '../../../components/Navigation';
 import QuestionDisplay from '../../../components/QuestionDisplay';
 import VideoRecorder from '../../../components/VideoRecorder';
 import FeedbackDisplay from '../../../components/FeedbackDisplay';
+import LimitErrorModal from '../../../components/LimitErrorModal';
 import { getQuestions, submitAnswer, getFeedback } from '../../../utils/api';
+import { invalidateSubscriptionCache } from '../../../hooks/useSubscription';
 
 function getSpeechErrorMessage(error) {
   const messages = {
@@ -34,6 +36,7 @@ function getQuestionLoadError(error) {
     isPlanRestriction,
     message: responseData.message || responseData.error ||
       'Failed to load interview questions. Please try again.',
+    errorCode: responseData.code || null,
   };
 }
 
@@ -70,6 +73,8 @@ function InterviewSessionContent() {
   const [sessionId, setSessionId] = useState(null);
   const [answer, setAnswer] = useState('');
   const [loadError, setLoadError] = useState('');
+  const [errorCode, setErrorCode] = useState(null);
+  const [showLimitModal, setShowLimitModal] = useState(false);
   const [canUpgradeForLoadError, setCanUpgradeForLoadError] = useState(false);
   const [speechState, setSpeechState] = useState('checking');
   const [speechMessage, setSpeechMessage] = useState('');
@@ -318,11 +323,21 @@ function InterviewSessionContent() {
         }
         setSessionId(data.session_id || 'session_123');
         setQuestions(data.questions);
+        
+        // Invalidate subscription and question categories caches since interview count has been incremented
+        invalidateSubscriptionCache();
       } catch (error) {
         const questionLoadError = getQuestionLoadError(error);
         setLoadError(questionLoadError.message);
+        setErrorCode(questionLoadError.errorCode);
         setCanUpgradeForLoadError(questionLoadError.isPlanRestriction);
-        toast.error(questionLoadError.message, { duration: 5000 });
+        
+        // Show modal for limit/restriction errors, toast for others
+        if (questionLoadError.isPlanRestriction) {
+          setShowLimitModal(true);
+        } else {
+          toast.error(questionLoadError.message, { duration: 5000 });
+        }
 
         if (!error.response || error.response.status >= 500) {
           console.error('Failed to load interview questions:', error);
@@ -471,21 +486,18 @@ function InterviewSessionContent() {
     return (
       <div className="min-h-screen bg-gray-50">
         <Navigation />
+        <LimitErrorModal
+          isOpen={showLimitModal}
+          error={loadError}
+          errorCode={errorCode}
+          onDismiss={() => setShowLimitModal(false)}
+        />
         <div className="flex h-64 items-center justify-center">
-          {loadError ? (
+          {loadError && !canUpgradeForLoadError ? (
             <div className="max-w-lg rounded-xl border border-red-200 bg-white p-6 text-center shadow-sm">
               <h2 className="text-xl font-semibold text-gray-900">Unable to start interview</h2>
               <p className="mt-2 text-gray-600">{loadError}</p>
               <div className="mt-5 flex flex-wrap justify-center gap-3">
-                {canUpgradeForLoadError && (
-                  <button
-                    type="button"
-                    onClick={() => router.push('/subscription')}
-                    className="rounded-lg bg-blue-600 px-4 py-2 font-semibold text-white hover:bg-blue-700"
-                  >
-                    View plans
-                  </button>
-                )}
                 <button
                   type="button"
                   onClick={() => router.push('/interview/setup')}
@@ -530,6 +542,18 @@ function InterviewSessionContent() {
   return (
     <div className="min-h-screen bg-gray-50">
       <Navigation />
+
+      <LimitErrorModal
+        isOpen={showLimitModal}
+        error={loadError}
+        errorCode={errorCode}
+        onDismiss={() => {
+          setShowLimitModal(false);
+          if (canUpgradeForLoadError) {
+            router.push('/interview/setup');
+          }
+        }}
+      />
 
       <div className="container mx-auto px-4 py-8">
         {/* Progress bar and timer */}
@@ -614,18 +638,23 @@ function InterviewSessionContent() {
             )}
 
             {loadError && (
-              <div className="mt-4 rounded-lg bg-red-50 p-4 border border-red-200">
-                <p className="font-semibold text-red-900 mb-2">⚠️ Analysis Failed</p>
-                <p className="text-red-700 text-sm mb-3">{loadError}</p>
-                <button
-                  onClick={() => {
-                    setLoadError('');
-                    setCanUpgradeForLoadError(false);
-                  }}
-                  className="px-3 py-1 bg-red-200 hover:bg-red-300 text-red-800 rounded text-sm font-medium transition"
-                >
-                  Dismiss
-                </button>
+              <div className="mt-4 rounded-lg bg-red-50 p-4 border border-red-200 border-l-4 border-l-red-600">
+                <div className="flex items-start gap-3">
+                  <span className="text-xl text-red-600 flex-shrink-0">⚠️</span>
+                  <div className="flex-1">
+                    <p className="font-semibold text-red-900 mb-1">Analysis Failed</p>
+                    <p className="text-red-700 text-sm mb-3">{loadError}</p>
+                    <button
+                      onClick={() => {
+                        setLoadError('');
+                        setErrorCode(null);
+                      }}
+                      className="inline-flex px-3 py-1.5 bg-red-100 hover:bg-red-200 text-red-800 rounded text-sm font-medium transition"
+                    >
+                      Dismiss
+                    </button>
+                  </div>
+                </div>
               </div>
             )}
           </div>
