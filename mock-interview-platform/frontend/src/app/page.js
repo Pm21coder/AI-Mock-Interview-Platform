@@ -164,7 +164,7 @@ export default function Home() {
                         height={260}
                         priority={false}
                         loading="lazy"
-                        className="h-[260px] w-full rounded-[1.2rem] object-cover"
+                        className="h-auto w-full rounded-[1.2rem] object-cover"
                       />
                       <div className="absolute inset-0 bg-gradient-to-tr from-blue-600/35 via-indigo-500/10 to-transparent" />
                       <div className="absolute inset-x-3 bottom-3 rounded-2xl border border-white/10 bg-slate-950/45 p-3 backdrop-blur-md">
