@@ -112,7 +112,12 @@ def get_subscription_status():
 
     # Use the subscription service for consistent handling
     subscription = subscription_service.get_user_subscription(user_id)
-    return jsonify(subscription), 200
+    response = jsonify(subscription)
+    # Quota changes when an interview starts, so this user-specific response
+    # must never be reused by a browser or intermediary cache.
+    response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+    response.headers['Pragma'] = 'no-cache'
+    return response, 200
 
 
 @subscription_bp.route('/create-order', methods=['POST'])

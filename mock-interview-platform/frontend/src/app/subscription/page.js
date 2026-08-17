@@ -4,9 +4,9 @@ import { Suspense, useState, useEffect, useCallback } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Navigation from '../../components/Navigation';
 import { useInterviewSync, useSubscriptionSync } from '../../hooks/useInterviewSync';
+import { useSubscription } from '../../hooks/useSubscription';
 import {
   createRazorpayOrder,
-  getSubscriptionStatus,
   verifyRazorpayPayment,
 } from '../../utils/api';
 
@@ -80,22 +80,6 @@ const hasAuthToken = () => (
   typeof window !== 'undefined' && Boolean(window.localStorage.getItem('auth_token'))
 );
 
-const fetchSubscriptionStatus = async (setSubscription, setLoading, setError) => {
-  try {
-    setLoading(true);
-    const data = await getSubscriptionStatus();
-    if (data.error) {
-      setError('Failed to load subscription data');
-    } else {
-      setSubscription(data);
-    }
-  } catch (err) {
-    setError('Failed to load subscription data');
-  } finally {
-    setLoading(false);
-  }
-};
-
 export default function SubscriptionPage() {
   return (
     <Suspense fallback={<SubscriptionLoading />}>
@@ -118,16 +102,18 @@ function SubscriptionLoading() {
 function SubscriptionPageContent() {
   const router = useRouter();
   const params = useSearchParams();
-  const [subscription, setSubscription] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const {
+    subscription,
+    loading,
+    error: subscriptionError,
+    refetch,
+  } = useSubscription();
   const [error, setError] = useState(null);
   const [upgradePrompt, setUpgradePrompt] = useState(null);
   const [processing, setProcessing] = useState(false);
   const [processingTier, setProcessingTier] = useState(null);
 
-  const refreshSubscription = useCallback(() => {
-    fetchSubscriptionStatus(setSubscription, setLoading, setError);
-  }, []);
+  const refreshSubscription = useCallback(() => refetch(), [refetch]);
 
   useEffect(() => {
     refreshSubscription();
@@ -219,7 +205,7 @@ function SubscriptionPageContent() {
             if (result.status !== 'success') {
               throw new Error(result.error || 'Payment verification failed');
             }
-            await fetchSubscriptionStatus(setSubscription, setLoading, setError);
+            await refreshSubscription();
             alert('Payment verified successfully! Your subscription is now active.');
           } catch (err) {
             setError(err.response?.data?.error || err.message || 'Payment verification failed');
@@ -296,7 +282,7 @@ function SubscriptionPageContent() {
         throw new Error(result.error || 'Demo payment verification failed');
       }
 
-      await fetchSubscriptionStatus(setSubscription, setLoading, setError);
+      await refreshSubscription();
       alert(`Demo payment successful! Your account has been upgraded to ${tier.toUpperCase()}.`);
     } catch (err) {
       setError(err.response?.data?.error || err.message || 'Demo payment failed');
@@ -441,9 +427,9 @@ function SubscriptionPageContent() {
         )}
 
         {/* Error Message */}
-        {error && (
+        {(error || subscriptionError) && (
           <div className="mb-8 rounded-lg bg-red-50 p-4 text-red-700">
-            {error}
+            {error || subscriptionError}
           </div>
         )}
 

@@ -328,6 +328,15 @@ function InterviewSessionContent() {
         invalidateSubscriptionCache();
       } catch (error) {
         const questionLoadError = getQuestionLoadError(error);
+
+        // The backend is the authority for quota checks. Redirect immediately
+        // instead of leaving the user on a failed session while a timer runs.
+        if (questionLoadError.errorCode === 'interview_limit_reached') {
+          invalidateSubscriptionCache();
+          router.replace('/subscription?upgrade_prompt=limit_reached');
+          return;
+        }
+
         setLoadError(questionLoadError.message);
         setErrorCode(questionLoadError.errorCode);
         setCanUpgradeForLoadError(questionLoadError.isPlanRestriction);
@@ -335,13 +344,6 @@ function InterviewSessionContent() {
         // Show modal for limit/restriction errors, toast for others
         if (questionLoadError.isPlanRestriction) {
           setShowLimitModal(true);
-          // Auto-redirect to subscription after 2 seconds if quota exceeded
-          if (questionLoadError.errorCode === 'interview_limit_reached') {
-            const redirectTimer = setTimeout(() => {
-              router.push('/subscription?upgrade_prompt=limit_reached');
-            }, 2000);
-            return () => clearTimeout(redirectTimer);
-          }
         } else {
           toast.error(questionLoadError.message, { duration: 5000 });
         }

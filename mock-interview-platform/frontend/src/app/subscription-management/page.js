@@ -30,42 +30,48 @@ export default function SubscriptionManagementPage() {
   const [showCancelConfirm, setShowCancelConfirm] = useState(false);
 
   const fetchData = useCallback(async () => {
+    // Usage is the information required to render the plan and quota cards.
+    // Start lower-priority panels in parallel, but do not block the entire
+    // page while billing history and optional feature metadata load.
+    const supplementalData = Promise.all([
+      getBillingHistory().catch(() => null),
+      getAvailableFeatures().catch(() => null),
+      getQuestionCategories().catch(() => null),
+      getFeedbackHistoryLimit().catch(() => null),
+    ]);
+
     try {
       setLoading(true);
       setError(null);
 
-      const [statsData, historyData, featuresData, categoriesData, historyLimitData] = await Promise.all([
-        getUsageStats(),
-        getBillingHistory(),
-        getAvailableFeatures(),
-        getQuestionCategories().catch(() => null),
-        getFeedbackHistoryLimit().catch(() => null),
-      ]);
+      const statsData = await getUsageStats();
 
       if (statsData && !statsData.error) {
         setUsageStats(statsData);
-      }
-
-      if (historyData && historyData.billing_history) {
-        setBillingHistory(historyData.billing_history);
-      }
-
-      if (featuresData && featuresData.features) {
-        setFeatures(featuresData.features);
-      }
-
-      if (categoriesData) {
-        setQuestionCategories(categoriesData);
-      }
-
-      if (historyLimitData) {
-        setFeedbackHistoryLimit(historyLimitData);
       }
     } catch (err) {
       setError('Failed to load subscription data');
       console.error(err);
     } finally {
       setLoading(false);
+    }
+
+    const [historyData, featuresData, categoriesData, historyLimitData] = await supplementalData;
+
+    if (historyData?.billing_history) {
+      setBillingHistory(historyData.billing_history);
+    }
+
+    if (featuresData?.features) {
+      setFeatures(featuresData.features);
+    }
+
+    if (categoriesData) {
+      setQuestionCategories(categoriesData);
+    }
+
+    if (historyLimitData) {
+      setFeedbackHistoryLimit(historyLimitData);
     }
   }, []);
 

@@ -94,6 +94,33 @@ class InterviewQuestionRouteTests(TestCase):
         self.assertEqual(response.get_json()['code'], 'category_not_in_plan')
         self.assertEqual(response.get_json()['required_tier'], 'basic')
 
+    def test_quota_exhaustion_returns_an_upgrade_response_before_generation(self):
+        limit_error = {
+            'error': 'Monthly interview limit reached',
+            'code': 'interview_limit_reached',
+            'upgrade_url': '/subscription',
+        }
+        with patch(
+            'app.routes.interview.subscription_service.check_interview_limit',
+            return_value=(False, limit_error),
+        ), patch(
+            'app.routes.interview.gemini_service.generate_questions',
+        ) as generate_questions_mock:
+            with self.app.test_request_context(
+                '/api/interview/generate-questions',
+                method='POST',
+                json={
+                    'job_role': 'Software Engineer',
+                    'category': 'technical',
+                },
+            ):
+                request.current_user = {'_id': self.user_id}
+                response, status_code = generate_questions.__wrapped__()
+
+        self.assertEqual(status_code, 403)
+        self.assertEqual(response.get_json()['code'], 'interview_limit_reached')
+        generate_questions_mock.assert_not_called()
+
 
 class SubscriptionFallbackTests(TestCase):
     def tearDown(self):

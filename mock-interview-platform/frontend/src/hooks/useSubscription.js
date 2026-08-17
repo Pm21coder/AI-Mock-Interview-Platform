@@ -1,54 +1,60 @@
-import { useCallback, useEffect, useState, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useAuth } from './useAuth';
-import { getSubscriptionStatus, invalidateAllSubscriptionCaches } from '../utils/api';
+import {
+  getSubscriptionStatus,
+  invalidateAllSubscriptionCaches,
+  invalidateQuestionCategoriesCache,
+} from '../utils/api';
 
 const STORAGE_KEY = 'subscription_data';
-const CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
+const CACHE_DURATION = 60 * 1000; // Show cached data instantly; revalidate every minute.
+const inFlightRequests = new Map();
 
-/**
- * Get cached subscription data from localStorage.
- * Returns null if cache is expired.
- */
-function getCachedSubscription() {
-  if (typeof window === 'undefined') return null;
-  
+function getCachedSubscription(accountEmail) {
+  if (typeof window === 'undefined' || !accountEmail) return null;
+
   try {
     const stored = window.localStorage.getItem(STORAGE_KEY);
     if (!stored) return null;
-    
-    const { data, timestamp } = JSON.parse(stored);
-    
-    // Check if cache has expired
-    if (Date.now() - timestamp > CACHE_DURATION) {
+
+    const { accountEmail: cachedEmail, data, timestamp } = JSON.parse(stored);
+    if (cachedEmail !== accountEmail || !data || Date.now() - timestamp > CACHE_DURATION) {
       window.localStorage.removeItem(STORAGE_KEY);
       return null;
     }
-    
+
     return data;
   } catch {
     return null;
   }
 }
 
-/**
- * Store subscription data in localStorage with timestamp.
- */
-function cacheSubscription(data) {
-  if (typeof window === 'undefined') return;
-  
+function cacheSubscription(data, accountEmail) {
+  if (typeof window === 'undefined' || !accountEmail) return;
+
   try {
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify({
+      accountEmail,
       data,
       timestamp: Date.now(),
     }));
   } catch {
-    // localStorage may be full or unavailable
+    // localStorage may be full or unavailable.
   }
 }
 
-/**
- * Clear cached subscription data (exported for external use).
- */
+function requestSubscription(accountKey) {
+  const pendingRequest = inFlightRequests.get(accountKey);
+  if (pendingRequest) return pendingRequest;
+
+  const request = getSubscriptionStatus().finally(() => {
+    inFlightRequests.delete(accountKey);
+  });
+  inFlightRequests.set(accountKey, request);
+  return request;
+}
+
+/** Clear the current user's subscription and dependent API caches. */
 export function invalidateSubscriptionCache() {
   if (typeof window === 'undefined') return;
   window.localStorage.removeItem(STORAGE_KEY);
@@ -56,128 +62,96 @@ export function invalidateSubscriptionCache() {
 }
 
 /**
- * Hook to access persistent subscription data.
- * Automatically fetches and caches subscription status.
+ * Read subscription details with a cache-first, network-revalidated strategy.
+ * Cached data makes navigation immediate; the status endpoint remains the
+ * source of truth and is revalidated on mount, on demand, and every minute.
  */
 export function useSubscription() {
-  const { isAuthenticated } = useAuth();
-  const [subscription, setSubscription] = useState(null);
+  const { isAuthenticated, email } = useAuth();
+  const [subscription, setSubscription] = useState(() => getCachedSubscription(email));
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
-  const isFetchingRef = useRef(false);
-  const lastFetchRef = useRef(0);
+  const subscriptionTierRef = useRef(subscription?.tier || null);
 
-  /**
-   * Fetch subscription from API and cache it.
-   * Debounces rapid calls to avoid redundant requests.
-   * Optimized to load cached data immediately and fetch in background.
-   */
-  const fetchSubscription = useCallback(async (skipCache = false) => {
+  const applySubscription = useCallback((data) => {
+    if (subscriptionTierRef.current && data?.tier && subscriptionTierRef.current !== data.tier) {
+      // Categories are plan-dependent, so an upgrade/downgrade must not reuse
+      // a response cached for the former plan.
+      invalidateQuestionCategoriesCache();
+    }
+
+    subscriptionTierRef.current = data?.tier || null;
+    setSubscription(data);
+    cacheSubscription(data, email);
+  }, [email]);
+
+  const fetchSubscription = useCallback(async () => {
     if (!isAuthenticated || typeof window === 'undefined') {
+      subscriptionTierRef.current = null;
       setSubscription(null);
-      return;
+      setLoading(false);
+      return null;
     }
 
-    // Return cached data if available and not skipped
-    if (!skipCache) {
-      const cached = getCachedSubscription();
-      if (cached) {
-        setSubscription(cached);
-        setLoading(false);
-        // Silently refresh in background after 30 seconds
-        const refreshTimer = setTimeout(() => {
-          if (isFetchingRef.current) return;
-          isFetchingRef.current = true;
-          getSubscriptionStatus()
-            .then(data => {
-              if (data && !data.error) {
-                setSubscription(data);
-                cacheSubscription(data);
-              }
-            })
-            .catch(() => {
-              // Silent fail, keep cached data
-            })
-            .finally(() => {
-              isFetchingRef.current = false;
-            });
-        }, 30000);
-        return () => clearTimeout(refreshTimer);
-      }
+    const cached = getCachedSubscription(email);
+    if (cached) {
+      applySubscription(cached);
+    } else {
+      setLoading(true);
     }
-
-    // Debounce rapid fetch calls
-    const now = Date.now();
-    if (isFetchingRef.current || (now - lastFetchRef.current < 800)) {
-      return;
-    }
-
-    isFetchingRef.current = true;
-    lastFetchRef.current = now;
-    setLoading(true);
     setError(null);
 
     try {
-      const data = await getSubscriptionStatus();
-      if (data && !data.error) {
-        setSubscription(data);
-        cacheSubscription(data);
-        setError(null);
-      } else {
-        setError(data?.error || 'Failed to load subscription');
+      const data = await requestSubscription(email || '__authenticated__');
+      if (!data || data.error) {
+        throw new Error(data?.error || 'Failed to load subscription');
       }
-    } catch (err) {
-      console.error('Failed to fetch subscription:', err);
-      
-      // Fall back to cached data if API fails
-      const cached = getCachedSubscription();
-      if (cached) {
-        setSubscription(cached);
-        setError(null);
-      } else {
+
+      applySubscription(data);
+      return data;
+    } catch {
+      // Keep the last verified value visible if the user is temporarily offline.
+      if (!cached) {
         setError('Failed to load subscription data');
       }
+      return cached;
     } finally {
       setLoading(false);
-      isFetchingRef.current = false;
     }
-  }, [isAuthenticated]);
+  }, [applySubscription, email, isAuthenticated]);
 
-  // Load cached subscription immediately on mount
   useEffect(() => {
-    if (isAuthenticated && typeof window !== 'undefined') {
-      const cached = getCachedSubscription();
-      if (cached) {
-        setSubscription(cached);
+    const initialLoad = window.setTimeout(() => {
+      if (!isAuthenticated) {
+        subscriptionTierRef.current = null;
+        setSubscription(null);
+        setLoading(false);
+        return;
       }
-    }
-  }, [isAuthenticated]);
 
-  // Fetch subscription when authentication changes or on first load
+      const cached = getCachedSubscription(email);
+      if (cached) applySubscription(cached);
+      void fetchSubscription();
+    }, 0);
+
+    return () => window.clearTimeout(initialLoad);
+  }, [applySubscription, email, fetchSubscription, isAuthenticated]);
+
   useEffect(() => {
-    if (isAuthenticated) {
-      fetchSubscription();
-    } else {
-      setSubscription(null);
-    }
-  }, [isAuthenticated, fetchSubscription]);
+    if (!isAuthenticated) return undefined;
 
-  // Refresh subscription every 5 minutes
-  useEffect(() => {
-    if (!isAuthenticated) return;
-
-    const interval = setInterval(() => {
-      fetchSubscription(true); // Skip cache and fetch fresh
+    const interval = window.setInterval(() => {
+      void fetchSubscription();
     }, CACHE_DURATION);
 
-    return () => clearInterval(interval);
-  }, [isAuthenticated, fetchSubscription]);
+    return () => window.clearInterval(interval);
+  }, [fetchSubscription, isAuthenticated]);
 
   return {
     subscription,
     loading,
     error,
-    refetch: () => fetchSubscription(true), // Force refresh
+    refetch: fetchSubscription,
     isGuest: !isAuthenticated,
   };
 }
