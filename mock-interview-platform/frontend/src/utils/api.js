@@ -157,7 +157,7 @@ const api = axios.create({
 api.interceptors.request.use((config) => {
   if (typeof window !== 'undefined') {
     const token = window.localStorage.getItem('auth_token');
-    if (token) config.headers.Authorization = `Bearer ${token}`;
+    if (token) config.headers.Authorization = 'Bearer ' + token;
   }
   return config;
 });
@@ -282,7 +282,7 @@ export const submitAnswer = async (data) => {
           return parsed;
         }
       } catch (e) {
-        // Not JSON — fall through and return a structured error
+        // Not JSON  fall through and return a structured error
         return {
           error: 'Server error',
           details: errorPayload,
@@ -462,7 +462,7 @@ export const createRazorpayOrder = async (data) => {
 
     // Provide specific context for Gateway errors
     if (status === 502) {
-      console.error('ðŸ”´ 502 Bad Gateway Error: The upstream Python backend (Werkzeug) crashed or timed out.');
+      console.error('🔴 502 Bad Gateway Error: The upstream Python backend (Werkzeug) crashed or timed out.');
       console.error('Backend may have encountered an unhandled exception. Check backend logs and .env configuration.');
       console.error('Common causes: Missing Razorpay credentials, API key issues, or MongoDB connection problems.');
     }
@@ -632,5 +632,6 @@ export const getFeedbackHistoryLimit = async () => {
   setCachedData(cacheKey, response.data, CACHE_TTL.features);
   return response.data;
 };
+
 
 
