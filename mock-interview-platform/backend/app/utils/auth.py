@@ -7,6 +7,7 @@ from flask import jsonify, request
 
 from app import mongo
 from app.config import Config
+from app.utils.mongo_state import is_mongo_available, mark_mongo_unavailable
 
 
 def get_user_id_from_token(token):
@@ -48,9 +49,14 @@ def token_required(f):
             except (InvalidId, TypeError):
                 return jsonify({'error': 'Invalid token payload'}), 401
 
+            if not is_mongo_available():
+                request.current_user = {'_id': user_id, 'email': payload.get('email', '')}
+                return f(*args, **kwargs)
+
             try:
                 user = mongo.db.users.find_one({'_id': object_id})
-            except Exception:
+            except Exception as exc:
+                mark_mongo_unavailable(exc)
                 request.current_user = {'_id': user_id, 'email': payload.get('email', '')}
                 return f(*args, **kwargs)
 

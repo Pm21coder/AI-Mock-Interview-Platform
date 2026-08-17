@@ -9,6 +9,44 @@ const CACHE_TTL = {
   default: 2 * 60 * 1000, // 2 minutes
 };
 
+const REQUEST_TIMEOUTS = {
+  resumeAnalysis: 10_000,
+  resumeHistory: 10_000,
+  subscriptionStatus: 8_000,
+  questionCategories: 8_000,
+  createOrder: 15_000,
+};
+
+function responseBodyForLog(error) {
+  if (!error?.response) return 'No response received from the server';
+
+  const body = error.response.data;
+  if (body == null || (typeof body === 'object' && Object.keys(body).length === 0)) {
+    return 'Empty server response body';
+  }
+  return body;
+}
+
+function logApiError(endpoint, error) {
+  console.error('API error:', {
+    endpoint,
+    status: error?.response?.status ?? null,
+    statusText: error?.response?.statusText ?? null,
+    data: responseBodyForLog(error),
+    message: error?.message || 'Unknown request error',
+  });
+}
+
+function invalidResumeIdError(resumeId) {
+  const error = new Error('A valid resume ID is required to load an analysis.');
+  error.code = 'INVALID_RESUME_ID';
+  console.error('Resume analysis request skipped:', {
+    reason: error.message,
+    resumeIdPresent: Boolean(resumeId),
+  });
+  return error;
+}
+
 function getCacheKey(method, url, params) {
   const paramStr = params ? JSON.stringify(params) : '';
   return `${method}:${url}:${paramStr}`;
@@ -248,38 +286,50 @@ export const uploadResume = async (formData) => {
 };
 
 export const getResumeAnalysis = async (resumeId) => {
-  const response = await api.get(`/api/resume/analysis/${resumeId}`);
-  return response.data;
+  if (typeof resumeId !== 'string' || !resumeId.trim()) {
+    throw invalidResumeIdError(resumeId);
+  }
+
+  const endpoint = `/api/resume/analysis/${encodeURIComponent(resumeId.trim())}`;
+  try {
+    const response = await api.get(endpoint, { timeout: REQUEST_TIMEOUTS.resumeAnalysis });
+    return response.data;
+  } catch (error) {
+    logApiError(endpoint, error);
+    throw error;
+  }
 };
 
 export const getResumeHistory = async () => {
   try {
-    const response = await api.get('/api/resume/history');
+    const response = await api.get('/api/resume/history', {
+      timeout: REQUEST_TIMEOUTS.resumeHistory,
+    });
     return response.data;
   } catch (error) {
-    if (error.response) {
-      console.error('Resume history API error:', {
-        status: error.response.status,
-        data: error.response.data,
-      });
-    } else if (error.request) {
-      console.error('No response received for resume history request:', error.request);
-    } else {
-      console.error('Resume history request setup failed:', error.message);
-    }
+    logApiError('/api/resume/history', error);
     throw error;
   }
 };
 
 // Subscription API functions
 export const getSubscriptionStatus = async () => {
-  const response = await api.get('/api/subscription/status');
-  return response.data;
+  try {
+    const response = await api.get('/api/subscription/status', {
+      timeout: REQUEST_TIMEOUTS.subscriptionStatus,
+    });
+    return response.data;
+  } catch (error) {
+    logApiError('/api/subscription/status', error);
+    throw error;
+  }
 };
 
 export const createRazorpayOrder = async (data) => {
   try {
-    const response = await api.post('/api/subscription/create-order', data);
+    const response = await api.post('/api/subscription/create-order', data, {
+      timeout: REQUEST_TIMEOUTS.createOrder,
+    });
     return response.data;
   } catch (error) {
     const status = error?.response?.status;
@@ -293,24 +343,12 @@ export const createRazorpayOrder = async (data) => {
     }
 
     // Log structured error data for debugging
-    console.error('API Error Details:', {
-      endpoint: '/api/subscription/create-order',
-      status,
-      statusText: error?.response?.statusText,
-      message: error?.message,
-      data: respData,
-      request: data,
-    });
-
-    try {
-      console.error('createRazorpayOrder full error object:', error);
-    } catch (logErr) {
-      // Swallow logging errors
-    }
+    logApiError('/api/subscription/create-order', error);
 
     const serverMsg = respData?.error || respData?.message || error?.message || 'Unknown error creating Razorpay order';
     const out = new Error(serverMsg);
     out.status = status;
+    out.response = error?.response;
     throw out;
   }
 };
@@ -404,25 +442,18 @@ export const getQuestionCategories = async () => {
   if (cached) return cached;
 
   try {
-    const response = await api.get('/api/subscription/question-categories');
+    const response = await api.get('/api/subscription/question-categories', {
+      timeout: REQUEST_TIMEOUTS.questionCategories,
+    });
     setCachedData(cacheKey, response.data, CACHE_TTL.questionCategories);
     return response.data;
   } catch (error) {
     // Always return safe fallback for question categories to prevent app from crashing
     try {
       const status = error?.response?.status;
-      const errorMessage = error?.response?.data?.error || error?.message || 'Failed to load question categories';
-      const errorDetails = {
-        status,
-        message: errorMessage,
-        details: error?.response?.data?.details,
-      };
-      
       const isNetworkError = !error?.response;
-      const isServerError = status >= 500;
-      
       console.warn(`[getQuestionCategories] API failed (network=${isNetworkError}, status=${status}), using fallback`);
-      if (error?.message) console.debug('[getQuestionCategories] Error details:', errorDetails);
+      logApiError('/api/subscription/question-categories', error);
     } catch (logError) {
       console.debug('[getQuestionCategories] Could not log error details:', logError);
     }

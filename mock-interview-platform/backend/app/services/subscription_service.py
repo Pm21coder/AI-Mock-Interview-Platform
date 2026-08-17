@@ -10,6 +10,7 @@ import logging
 
 from app import mongo
 from app.config import Config
+from app.utils.mongo_state import is_mongo_available, mark_mongo_unavailable
 from app.utils.time import utc_now
 
 logger = logging.getLogger(__name__)
@@ -58,11 +59,13 @@ class SubscriptionService:
         Returns:
             dict: Subscription details with tier, status, usage, features
         """
-        try:
-            user = mongo.db.users.find_one({'_id': user_id})
-        except Exception as e:
-            logger.error(f'Error fetching user {user_id}: {e}')
-            user = None
+        user = None
+        if is_mongo_available():
+            try:
+                user = mongo.db.users.find_one({'_id': user_id})
+            except Exception as exc:
+                mark_mongo_unavailable(exc)
+                logger.warning('Error fetching subscription user %s: %s', user_id, exc)
 
         if not user:
             fallback_subscription = fallback_subscriptions.get(str(user_id))
@@ -407,9 +410,13 @@ class SubscriptionService:
         if start_date:
             query['created_at'] = {'$gte': start_date}
 
+        if not is_mongo_available():
+            return 0
+
         try:
             return mongo.db.interviews.count_documents(query)
-        except Exception:
+        except Exception as exc:
+            mark_mongo_unavailable(exc)
             return 0
 
     def _get_local_user_subscription(self, user_id, email, user_record, users):
@@ -786,7 +793,7 @@ class SubscriptionService:
     # Feature Access Methods
     # ========================
 
-    def get_available_question_categories(self, user_id):
+    def get_available_question_categories(self, user_id, subscription=None):
         """
         Get the list of question categories available to a user based on tier.
 
@@ -796,7 +803,7 @@ class SubscriptionService:
         Returns:
             list: Available category names or 'all' for unlimited
         """
-        sub = self.get_user_subscription(user_id)
+        sub = subscription or self.get_user_subscription(user_id)
         tier = sub['tier']
         plan_info = self.config_tiers.get(tier, {})
         

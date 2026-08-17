@@ -142,6 +142,11 @@ function SubscriptionPageContent() {
   });
 
   const handleRazorpayCheckout = async (tier) => {
+    if (!['basic', 'pro'].includes(tier)) {
+      setError('Please select a valid paid subscription plan.');
+      return;
+    }
+
     if (!hasAuthToken()) {
       setError('Please sign in before making a payment.');
       router.push('/auth?next=/subscription');
@@ -236,7 +241,8 @@ function SubscriptionPageContent() {
       setProcessingTier(null);
 
       const serverMsg = err.response?.data?.error || err.message || '';
-      const isAuthError = err.response?.status === 401 && (
+      const status = err.response?.status ?? err.status;
+      const isAuthError = status === 401 && (
         serverMsg.toLowerCase().includes('token') ||
         serverMsg.toLowerCase().includes('expired') ||
         serverMsg.toLowerCase().includes('user not found') ||

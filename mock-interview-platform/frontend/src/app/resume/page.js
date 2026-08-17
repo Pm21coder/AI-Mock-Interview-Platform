@@ -124,14 +124,22 @@ export default function ResumePage() {
   };
 
   const handleViewAnalysis = async (resumeId) => {
+    if (typeof resumeId !== 'string' || !resumeId.trim()) {
+      console.error('Cannot view resume analysis without a valid resume ID');
+      toast.error('This resume record is missing its analysis ID. Please refresh the history.');
+      return;
+    }
+
     try {
       const result = await getResumeAnalysis(resumeId);
       if (result.analysis) {
         setAnalysis(result.analysis);
         window.scrollTo({ top: 0, behavior: 'smooth' });
+      } else {
+        toast.error('No analysis was found for this resume.');
       }
     } catch (error) {
-      toast.error('Failed to load analysis');
+      toast.error(error.response?.data?.error || error.message || 'Failed to load analysis');
     }
   };
 

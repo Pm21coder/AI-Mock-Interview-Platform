@@ -11,6 +11,7 @@ from app.config import Config
 from app.services.subscription_service import SubscriptionService, fallback_subscriptions
 from app.services.audit_logger import get_audit_logger
 from app.utils.auth import token_required
+from app.utils.mongo_state import is_mongo_available, mark_mongo_unavailable
 from app.utils.time import utc_now
 from app.cache_utils import cache_response, optimize_response
 
@@ -172,7 +173,7 @@ def create_razorpay_order():
                     'user_id': str(current_user['_id']),
                     'email': current_user.get('email', ''),
                 },
-            })
+            }, timeout=Config.RAZORPAY_TIMEOUT_SECONDS)
         except (BadRequestError, GatewayError, ServerError) as exc:
             return _razorpay_order_error_response(exc)
         except Exception:
@@ -205,12 +206,13 @@ def create_razorpay_order():
     }
     fallback_razorpay_orders[order['id']] = order_record.copy()
 
-    try:
-        mongo.db.razorpay_orders.insert_one(order_record)
-    except Exception:
-        # Local/demo mode can still verify the payment against the in-memory
-        # order above. A production deployment should keep MongoDB available.
-        pass
+    if is_mongo_available():
+        try:
+            mongo.db.razorpay_orders.insert_one(order_record)
+        except Exception as exc:
+            # Local/demo mode can still verify the payment against the in-memory
+            # order above. A production deployment should keep MongoDB available.
+            mark_mongo_unavailable(exc)
     
     # Log payment initiation
     audit_logger.log_payment_initiated(
@@ -242,10 +244,12 @@ def verify_razorpay_payment():
     if not _is_real_user(current_user):
         return jsonify({'error': 'Please sign in with an account before making a payment'}), 401
 
-    try:
-        order_record = mongo.db.razorpay_orders.find_one({'order_id': razorpay_order_id})
-    except Exception:
-        order_record = None
+    order_record = None
+    if is_mongo_available():
+        try:
+            order_record = mongo.db.razorpay_orders.find_one({'order_id': razorpay_order_id})
+        except Exception as exc:
+            mark_mongo_unavailable(exc)
 
     if not order_record:
         order_record = fallback_razorpay_orders.get(razorpay_order_id)
@@ -283,24 +287,25 @@ def verify_razorpay_payment():
     # --- Activate subscription ---
     if tier in ['basic', 'pro']:
         activated_in_mongo = False
-        try:
-            result = mongo.db.users.update_one(
-                {'_id': current_user['_id']},
-                {
-                    '$set': {
-                        'subscription_tier': tier,
-                        'subscription_status': 'active',
-                        'subscription_start_date': utc_now(),
-                        'subscription_end_date': utc_now() + timedelta(days=30),
-                        'razorpay_order_id': razorpay_order_id,
-                        'razorpay_payment_id': razorpay_payment_id,
-                        'interviews_used_this_month': 0,
+        if is_mongo_available():
+            try:
+                result = mongo.db.users.update_one(
+                    {'_id': current_user['_id']},
+                    {
+                        '$set': {
+                            'subscription_tier': tier,
+                            'subscription_status': 'active',
+                            'subscription_start_date': utc_now(),
+                            'subscription_end_date': utc_now() + timedelta(days=30),
+                            'razorpay_order_id': razorpay_order_id,
+                            'razorpay_payment_id': razorpay_payment_id,
+                            'interviews_used_this_month': 0,
+                        }
                     }
-                }
-            )
-            activated_in_mongo = result.matched_count > 0
-        except Exception:
-            activated_in_mongo = False
+                )
+                activated_in_mongo = result.matched_count > 0
+            except Exception as exc:
+                mark_mongo_unavailable(exc)
 
         if activated_in_mongo:
             try:
@@ -496,84 +501,40 @@ def check_feature_access(feature_name):
 @token_required
 def get_question_categories():
     """Get available question categories for the user's subscription tier"""
-    import logging
-    logger = logging.getLogger(__name__)
-    
     try:
         current_user = _get_current_user()
-        logger.info(f"get_question_categories: current_user type = {type(current_user)}, value = {current_user}")
-        
         if not current_user:
-            logger.warning("get_question_categories: current_user is None or falsy")
-            # Return safe default instead of 401 to allow app to continue
-            return jsonify({
-                'available_categories': ['technical', 'behavioral'],
-                'tier': 'free',
-                'interviews_remaining': 0,
-                'monthly_limit': 3,
-                'all_categories_available': False,
-                'fallback': True
-            }), 200
-        
+            raise ValueError('Authenticated user is missing')
+
         user_id = current_user.get('_id')
         if not user_id:
-            logger.warning(f"get_question_categories: user_id missing from current_user: {current_user}")
-            # Return safe default instead of 400
-            return jsonify({
-                'available_categories': ['technical', 'behavioral'],
-                'tier': 'free',
-                'interviews_remaining': 0,
-                'monthly_limit': 3,
-                'all_categories_available': False,
-                'fallback': True
-            }), 200
+            raise ValueError('Authenticated user ID is missing')
 
-        logger.info(f"get_question_categories: fetching categories for user {user_id}")
-        
-        categories = None
-        try:
-            categories = subscription_service.get_available_question_categories(user_id)
-            logger.info(f"get_question_categories: categories fetched = {categories}")
-        except Exception as cat_error:
-            logger.error(f"Error fetching categories for user {user_id}: {str(cat_error)}", exc_info=True)
-            categories = ['technical', 'behavioral']  # Fallback
-        
-        sub = None
-        try:
-            sub = subscription_service.get_user_subscription(user_id)
-            logger.info(f"get_question_categories: subscription fetched, tier = {sub.get('tier')}")
-        except Exception as sub_error:
-            logger.error(f"Error fetching subscription for user {user_id}: {str(sub_error)}", exc_info=True)
-            sub = {
-                'tier': 'free',
-                'interviews_remaining': 0,
-                'monthly_limit': 3
-            }  # Fallback
-        
-        # Build response using .get() to avoid KeyErrors
+        # Fetch subscription only once. The previous implementation made two
+        # sequential Mongo reads, doubling the failure latency.
+        sub = subscription_service.get_user_subscription(user_id)
+        categories = subscription_service.get_available_question_categories(
+            user_id, subscription=sub,
+        )
         response = {
             'available_categories': categories or ['technical', 'behavioral'],
-            'tier': sub.get('tier', 'free') if sub else 'free',
-            'interviews_remaining': sub.get('interviews_remaining', 0) if sub else 0,
-            'monthly_limit': sub.get('monthly_limit', 3) if sub else 3,
+            'tier': sub.get('tier', 'free'),
+            'interviews_remaining': sub.get('interviews_remaining', 0),
+            'monthly_limit': sub.get('monthly_limit', 3),
             'all_categories_available': (categories or []) == ['technical', 'behavioral', 'situational', 'system_design']
         }
-        
-        logger.info(f"get_question_categories: returning response with {len(response.get('available_categories', []))} categories")
         return jsonify(optimize_response(response)), 200
-        
-    except Exception as e:
-        logger.error(f'Unexpected error in get_question_categories: {str(e)}', exc_info=True)
-        # Even in unexpected errors, return a safe fallback
+
+    except Exception:
+        current_app.logger.exception('Unable to load question categories')
         return jsonify({
             'available_categories': ['technical', 'behavioral'],
             'tier': 'free',
             'interviews_remaining': 0,
             'monthly_limit': 3,
             'all_categories_available': False,
-            'error': str(e),
             'fallback': True
-        }), 200  # Return 200 instead of 500 to prevent app crash
+        }), 200
 
 
 @subscription_bp.route('/analytics', methods=['GET'])

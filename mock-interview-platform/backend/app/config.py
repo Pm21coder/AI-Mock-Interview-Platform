@@ -45,7 +45,13 @@ class Config:
     # reachable from the current machine. Atlas stays available only when an
     # explicit opt-in is set, which avoids broken SRV URLs taking down local
     # development.
-    MONGO_CONNECT_TIMEOUT_MS = int(os.getenv('MONGO_CONNECT_TIMEOUT_MS', '5000'))
+    # A single browser action can trigger multiple dependent Mongo reads. Keep
+    # each server-selection attempt short so an unavailable database does not
+    # turn into a 30-second-or-longer API request.
+    MONGO_CONNECT_TIMEOUT_MS = min(
+        max(int(os.getenv('MONGO_CONNECT_TIMEOUT_MS', '5000')), 250),
+        5000,
+    )
     DEFAULT_LOCAL_MONGO_URI = 'mongodb://admin:password123@localhost:27017/mock_interview?authSource=admin'
     use_atlas = os.getenv('USE_ATLAS_MONGO', 'false').lower() == 'true'
     env_uri = os.getenv('MONGODB_URI')
@@ -77,6 +83,10 @@ class Config:
     RAZORPAY_KEY_ID = os.getenv('RAZORPAY_KEY_ID', '')
     RAZORPAY_KEY_SECRET = os.getenv('RAZORPAY_KEY_SECRET', '')
     RAZORPAY_CURRENCY = os.getenv('RAZORPAY_CURRENCY', 'INR')
+    RAZORPAY_TIMEOUT_SECONDS = min(
+        max(float(os.getenv('RAZORPAY_TIMEOUT_SECONDS', '8')), 1.0),
+        15.0,
+    )
 
     # CORS Configuration
     # Restrict to specific origins for security. Prevents unauthorized cross-origin requests.

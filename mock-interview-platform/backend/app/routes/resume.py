@@ -1,5 +1,5 @@
 from datetime import datetime
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from flask import Blueprint, jsonify, request, current_app
 import os
@@ -8,6 +8,7 @@ from app import mongo
 from app.services.gemini_service import GeminiService
 from app.services.subscription_service import SubscriptionService
 from app.utils.auth import token_required
+from app.utils.mongo_state import is_mongo_available, mark_mongo_unavailable
 from app.utils.time import utc_now
 
 resume_bp = Blueprint('resume', __name__)
@@ -83,11 +84,13 @@ def upload_resume():
         }
         demo_resumes[resume_document['_id']] = resume_document
         
-        try:
-            mongo.db.resumes.insert_one(resume_document)
-        except Exception:
-            # If MongoDB is not available, continue without saving
-            pass
+        if is_mongo_available():
+            try:
+                mongo.db.resumes.insert_one(resume_document)
+            except Exception as exc:
+                # If MongoDB is not available, continue without saving and
+                # avoid retrying another full server-selection timeout.
+                mark_mongo_unavailable(exc)
         
         return jsonify({
             'success': True,
@@ -142,19 +145,27 @@ def extract_text_from_file(filepath, extension):
 @token_required
 def get_resume_analysis(resume_id):
     """Retrieve a previously analyzed resume."""
-    
+
+    try:
+        UUID(str(resume_id))
+    except (AttributeError, TypeError, ValueError):
+        return jsonify({'error': 'A valid resume ID is required'}), 400
+
     try:
         user_id = str(request.current_user.get('_id', 'guest'))
         resume = demo_resumes.get(resume_id)
         if resume and resume['user_id'] != user_id:
             resume = None
 
-        if not resume and current_app.config.get('MONGO_AVAILABLE', False):
-            resume = mongo.db.resumes.find_one({
-                '_id': resume_id,
-                'user_id': user_id,
-            })
-        
+        if not resume and is_mongo_available():
+            try:
+                resume = mongo.db.resumes.find_one({
+                    '_id': resume_id,
+                    'user_id': user_id,
+                })
+            except Exception as exc:
+                mark_mongo_unavailable(exc)
+
         if not resume:
             return jsonify({'error': 'Resume not found'}), 404
 
@@ -169,8 +180,11 @@ def get_resume_analysis(resume_id):
             'uploaded_at': uploaded_at
         })
     
-    except Exception as exc:
-        return jsonify({'error': str(exc)}), 500
+    except Exception:
+        current_app.logger.exception('Unable to retrieve resume analysis')
+        return jsonify({
+            'error': 'Unable to retrieve resume analysis. Please try again later.'
+        }), 500
 
 
 @resume_bp.route('/history', methods=['GET'])
@@ -179,13 +193,14 @@ def get_resume_history():
     """Get resume analysis history for the current user."""
 
     user_id = str(request.current_user.get('_id', 'guest'))
-    if current_app.config.get('MONGO_AVAILABLE', False):
+    if is_mongo_available():
         try:
             resumes = list(mongo.db.resumes.find(
                 {'user_id': user_id},
                 {'_id': 1, 'filename': 1, 'analysis': 1, 'uploaded_at': 1}
             ).sort('uploaded_at', -1).limit(10))
-        except Exception:
+        except Exception as exc:
+            mark_mongo_unavailable(exc)
             resumes = []
     else:
         resumes = [
