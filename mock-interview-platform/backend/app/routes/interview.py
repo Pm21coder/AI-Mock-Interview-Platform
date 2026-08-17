@@ -96,7 +96,14 @@ def generate_questions():
         }), 403
 
     try:
-        generated = gemini_service.generate_questions(job_role, category, difficulty, num_questions)
+        try:
+            generated = gemini_service.generate_questions(job_role, category, difficulty, num_questions)
+        except Exception as exc:
+            # If the AI provider fails, fall back to local canned questions so the
+            # user experience remains uninterrupted.
+            logger.exception('Gemini generate_questions failed for user %s: %s', user_id, exc)
+            generated = gemini_service.get_fallback_questions(job_role, category, num_questions)
+
         questions = [
             InterviewQuestion(
                 question.get('question', 'Tell me about your experience'),
@@ -110,7 +117,11 @@ def generate_questions():
             return jsonify({'error': 'No questions could be generated'}), 500
 
         # A generated question set consumes one interview from the plan.
-        subscription_service.increment_interview_count(subscription_user_id)
+        try:
+            subscription_service.increment_interview_count(subscription_user_id)
+        except Exception as exc:
+            # Log the failure but do not block question delivery to the user.
+            logger.exception('Failed to record interview usage for user %s: %s', subscription_user_id, exc)
 
         session_id = str(uuid4())
         interview = InterviewSession(user_id, job_role, questions)
