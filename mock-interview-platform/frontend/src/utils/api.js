@@ -151,10 +151,51 @@ export const login = async (credentials) => {
 };
 
 export const getQuestions = async (params) => {
-  const response = await api.post('/api/interview/generate-questions', params, {
-    timeout: REQUEST_TIMEOUTS.interviewQuestions,
-  });
-  return response.data;
+  try {
+    const response = await api.post('/api/interview/generate-questions', params, {
+      timeout: REQUEST_TIMEOUTS.interviewQuestions,
+    });
+    return response.data;
+  } catch (error) {
+    // Log detailed server error for diagnostics
+    logApiError('/api/interview/generate-questions', error);
+
+    // If server is unavailable or returns 5xx, provide a local fallback so the
+    // interview flow is not blocked for the user.
+    const status = error?.response?.status;
+    if (!error?.response || (status && status >= 500)) {
+      console.warn('Using local fallback questions because interview API is unavailable.');
+      const fallbackQuestions = [
+        {
+          question: 'Tell me about a challenging bug you fixed. What was the root cause and how did you resolve it?',
+          category: params?.category || 'technical',
+          difficulty: params?.difficulty || 'medium',
+          expected_answer: 'Look for technical diagnosis, stepwise debugging, and learning outcome.',
+        },
+        {
+          question: 'Describe a time you led a project from idea to delivery. What obstacles did you face?',
+          category: params?.category || 'behavioral',
+          difficulty: params?.difficulty || 'medium',
+          expected_answer: 'Look for leadership, planning, stakeholder management, and results.',
+        },
+        {
+          question: 'How would you design a scalable notification system for millions of users?',
+          category: params?.category || 'system_design',
+          difficulty: params?.difficulty || 'hard',
+          expected_answer: 'Discuss queuing, delivery guarantees, backpressure, and horizontal scaling.',
+        },
+      ];
+
+      return {
+        session_id: `local_fallback_${Date.now()}`,
+        questions: fallbackQuestions.slice(0, params?.num_questions || 3),
+        fallback: true,
+      };
+    }
+
+    // Re-throw non-recoverable errors so callers can handle them.
+    throw error;
+  }
 };
 
 export const submitAnswer = async (data) => {
