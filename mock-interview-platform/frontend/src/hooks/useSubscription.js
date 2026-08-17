@@ -70,6 +70,7 @@ export function useSubscription() {
   /**
    * Fetch subscription from API and cache it.
    * Debounces rapid calls to avoid redundant requests.
+   * Optimized to load cached data immediately and fetch in background.
    */
   const fetchSubscription = useCallback(async (skipCache = false) => {
     if (!isAuthenticated || typeof window === 'undefined') {
@@ -83,13 +84,31 @@ export function useSubscription() {
       if (cached) {
         setSubscription(cached);
         setLoading(false);
-        return;
+        // Silently refresh in background after 30 seconds
+        const refreshTimer = setTimeout(() => {
+          if (isFetchingRef.current) return;
+          isFetchingRef.current = true;
+          getSubscriptionStatus()
+            .then(data => {
+              if (data && !data.error) {
+                setSubscription(data);
+                cacheSubscription(data);
+              }
+            })
+            .catch(() => {
+              // Silent fail, keep cached data
+            })
+            .finally(() => {
+              isFetchingRef.current = false;
+            });
+        }, 30000);
+        return () => clearTimeout(refreshTimer);
       }
     }
 
     // Debounce rapid fetch calls
     const now = Date.now();
-    if (isFetchingRef.current || (now - lastFetchRef.current < 1000)) {
+    if (isFetchingRef.current || (now - lastFetchRef.current < 800)) {
       return;
     }
 
@@ -103,18 +122,20 @@ export function useSubscription() {
       if (data && !data.error) {
         setSubscription(data);
         cacheSubscription(data);
+        setError(null);
       } else {
         setError(data?.error || 'Failed to load subscription');
       }
     } catch (err) {
       console.error('Failed to fetch subscription:', err);
-      setError('Failed to load subscription data');
       
       // Fall back to cached data if API fails
       const cached = getCachedSubscription();
       if (cached) {
         setSubscription(cached);
         setError(null);
+      } else {
+        setError('Failed to load subscription data');
       }
     } finally {
       setLoading(false);

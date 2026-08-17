@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import Navigation from '../../components/Navigation';
 import {
   createRazorpayOrder,
@@ -97,15 +97,22 @@ const fetchSubscriptionStatus = async (setSubscription, setLoading, setError) =>
 
 export default function SubscriptionPage() {
   const router = useRouter();
+  const params = useSearchParams();
   const [subscription, setSubscription] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [upgradePrompt, setUpgradePrompt] = useState(null);
   const [processing, setProcessing] = useState(false);
   const [processingTier, setProcessingTier] = useState(null);
 
   useEffect(() => {
     fetchSubscriptionStatus(setSubscription, setLoading, setError);
-  }, [setSubscription, setLoading, setError]);
+    // Check for upgrade prompt in URL
+    const prompt = params.get('upgrade_prompt');
+    if (prompt === 'limit_reached') {
+      setUpgradePrompt('limit_reached');
+    }
+  }, [params]);
 
   const handleRazorpayCheckout = async (tier) => {
     if (!hasAuthToken()) {
@@ -349,6 +356,27 @@ export default function SubscriptionPage() {
             Start free and upgrade as you grow. All plans include a 7-day money-back guarantee.
           </p>
         </div>
+
+        {/* Upgrade Prompt Alert */}
+        {upgradePrompt === 'limit_reached' && (
+          <div className="mb-8 rounded-lg border border-orange-200 bg-orange-50 p-6">
+            <div className="flex items-start gap-4">
+              <div className="text-3xl">📊</div>
+              <div className="flex-1">
+                <h3 className="text-lg font-semibold text-orange-900">Monthly Interview Limit Reached</h3>
+                <p className="mt-2 text-sm text-orange-700">
+                  You've used all your monthly interviews on the Free plan. Upgrade your plan to continue practicing and unlock premium features like video analysis and all question categories.
+                </p>
+                <button
+                  onClick={() => setUpgradePrompt(null)}
+                  className="mt-3 text-sm font-medium text-orange-600 hover:text-orange-700 underline"
+                >
+                  Dismiss
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Current Subscription Status */}
         {subscription && subscription.tier !== 'free' && (

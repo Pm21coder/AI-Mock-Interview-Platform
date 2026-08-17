@@ -335,6 +335,13 @@ function InterviewSessionContent() {
         // Show modal for limit/restriction errors, toast for others
         if (questionLoadError.isPlanRestriction) {
           setShowLimitModal(true);
+          // Auto-redirect to subscription after 2 seconds if quota exceeded
+          if (questionLoadError.errorCode === 'interview_limit_reached') {
+            const redirectTimer = setTimeout(() => {
+              router.push('/subscription?upgrade_prompt=limit_reached');
+            }, 2000);
+            return () => clearTimeout(redirectTimer);
+          }
         } else {
           toast.error(questionLoadError.message, { duration: 5000 });
         }
@@ -346,7 +353,7 @@ function InterviewSessionContent() {
     };
 
     loadQuestions();
-  }, [params]);
+  }, [params, router]);
 
   // Timer: starts when questions are loaded, resets on each question change
   useEffect(() => {
