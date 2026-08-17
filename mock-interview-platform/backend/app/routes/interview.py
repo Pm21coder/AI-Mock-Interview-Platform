@@ -185,24 +185,37 @@ def analyze_answer():
     try:
         # Check if user has video analysis feature
         # Free tier can still submit answers, just won't get video analysis
-        has_video_feature = subscription_service.has_feature(
-            subscription_user_id,
-            'video_analysis',
-        )
+        try:
+            has_video_feature = subscription_service.has_feature(
+                subscription_user_id,
+                'video_analysis',
+            )
+        except Exception as feat_exc:
+            logger.warning(f'Failed to determine video feature access for user {subscription_user_id}: {feat_exc}')
+            has_video_feature = False
+
         video_data_provided = data.get('video_data', False)
         
         # Get subscription tier for premium AI coaching
-        is_premium = subscription_service.should_use_premium_ai_coaching(
-            subscription_user_id,
-        )
+        try:
+            is_premium = subscription_service.should_use_premium_ai_coaching(
+                subscription_user_id,
+            )
+        except Exception as tier_exc:
+            logger.warning(f'Failed to determine premium coaching eligibility for user {subscription_user_id}: {tier_exc}')
+            is_premium = False
         
         # Analyze the answer with appropriate tier
-        gemini_feedback = gemini_service.analyze_answer(
-            question, 
-            answer, 
-            expected_answer, 
-            is_premium=is_premium
-        )
+        try:
+            gemini_feedback = gemini_service.analyze_answer(
+                question, 
+                answer, 
+                expected_answer, 
+                is_premium=is_premium
+            )
+        except Exception as gem_exc:
+            logger.exception('Gemini analysis failed, falling back to heuristic feedback: %s', gem_exc)
+            gemini_feedback = gemini_service.get_fallback_feedback(is_premium=is_premium, user_answer=answer, expected_answer=expected_answer)
         
         # Provide video analysis only if feature is available
         # Free tier users can still submit with video, just without video analysis
@@ -228,8 +241,15 @@ def analyze_answer():
                 'total_frames_analyzed': 0,
             }
         
+        # Ensure NLP analysis never raises to avoid returning 500 to client
+        try:
+            nlp_analysis = nlp_service.analyze_answer_quality(answer, expected_answer)
+        except Exception as nlp_exc:
+            logger.exception('NLP analysis failed, using minimal heuristic fallback: %s', nlp_exc)
+            nlp_analysis = {'word_count': len(answer.split()), 'sentence_count': 0, 'sentiment': {'polarity': 0, 'subjectivity': 0}, 'keyword_coverage': 0, 'similarity_score': 0, 'grammar_score': 0, 'overall_quality': 0.0}
+
         combined_feedback = {
-            'nlp_analysis': nlp_service.analyze_answer_quality(answer, expected_answer),
+            'nlp_analysis': nlp_analysis,
             'gemini_feedback': gemini_feedback,
             'cv_analysis': cv_analysis,
             'timestamp': utc_now().isoformat(),
@@ -248,10 +268,11 @@ def analyze_answer():
         return jsonify(combined_feedback)
     except Exception as exc:
         error_msg = str(exc)
-        logger.error(f'Error analyzing answer for user {user_id}: {error_msg}')
+        logger.exception(f'Error analyzing answer for user {user_id}: %s', error_msg)
+        # Return a safe, non-sensitive error message to the client while logging details
         return jsonify({
             'error': 'Failed to analyze answer. Please try again.',
-            'details': error_msg
+            'details': None,
         }), 500
 
 
