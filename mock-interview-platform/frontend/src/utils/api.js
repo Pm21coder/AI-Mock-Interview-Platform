@@ -65,7 +65,16 @@ function logApiError(endpoint, error) {
     serialized.headers = null;
   }
 
-  console.error('API error:', { endpoint, ...serialized });
+  // Print a stable, serialized representation so TurboPack/DevTools show details
+  try {
+    const out = { endpoint, ...serialized };
+    console.error(`API error at ${endpoint}: ${JSON.stringify(out, null, 2)}`);
+    // Also emit a debug-level object for richer inspection when supported
+    console.debug('API error (debug):', out);
+  } catch (e) {
+    // Fallback if serialization fails for any reason
+    console.error('API error (unserializable):', endpoint, serialized, e);
+  }
 }
 
 function invalidResumeIdError(resumeId) {
