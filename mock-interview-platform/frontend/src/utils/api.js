@@ -233,11 +233,27 @@ export const submitAnswer = async (data) => {
     const response = await api.post('/api/interview/analyze-answer', data);
     return response.data;
   } catch (error) {
-    const errorPayload = error.response?.data;
+    let errorPayload = error.response?.data;
 
     console.error('submitAnswer API error:', error);
     if (error.response) {
-      console.error('submitAnswer server response:', errorPayload);
+      console.error('submitAnswer server response (raw):', errorPayload);
+    }
+
+    // If server returned a string payload, try to parse JSON out of it
+    if (typeof errorPayload === 'string') {
+      try {
+        const parsed = JSON.parse(errorPayload);
+        if (parsed && typeof parsed === 'object') {
+          return parsed;
+        }
+      } catch (e) {
+        // Not JSON — fall through and return a structured error
+        return {
+          error: 'Server error',
+          details: errorPayload,
+        };
+      }
     }
 
     if (errorPayload && typeof errorPayload === 'object') {
