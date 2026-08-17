@@ -12,9 +12,9 @@ export function getSocket() {
 
   const token = typeof window !== 'undefined' ? window.localStorage.getItem('auth_token') : null;
 
-  // Connect through the Next.js proxy to avoid CORS issues.
-  // The proxy in next.config.js forwards /socket.io/* to the backend.
-  const socketUrl = process.env.NEXT_PUBLIC_API_URL || window.location.origin;
+  // Connect through the Next.js proxy to avoid CORS issues. The proxy in
+  // next.config.js forwards /socket.io/* to the backend.
+  const socketUrl = window.location.origin;
 
   socket = io(socketUrl, {
     path: '/socket.io',

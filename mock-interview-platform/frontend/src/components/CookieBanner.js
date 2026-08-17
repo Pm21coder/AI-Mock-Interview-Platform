@@ -1,30 +1,48 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import Link from 'next/link';
+import { useSyncExternalStore } from 'react';
+
+const COOKIE_CONSENT_EVENT = 'cookie-consent-change';
+
+function subscribeToCookieConsent(callback) {
+  window.addEventListener('storage', callback);
+  window.addEventListener(COOKIE_CONSENT_EVENT, callback);
+
+  return () => {
+    window.removeEventListener('storage', callback);
+    window.removeEventListener(COOKIE_CONSENT_EVENT, callback);
+  };
+}
+
+function getCookieConsent() {
+  return window.localStorage.getItem('cookie-consent');
+}
+
+function getServerCookieConsent() {
+  return 'unknown';
+}
 
 export default function CookieBanner() {
-  const [isVisible, setIsVisible] = useState(false);
-  const [isClient, setIsClient] = useState(false);
+  const cookieConsent = useSyncExternalStore(
+    subscribeToCookieConsent,
+    getCookieConsent,
+    getServerCookieConsent,
+  );
 
-  useEffect(() => {
-    setIsClient(true);
-    // Check if user has already made a choice
-    const cookieConsent = localStorage.getItem('cookie-consent');
-    if (!cookieConsent) {
-      setIsVisible(true);
-    }
-  }, []);
+  const setCookieConsent = (value) => {
+    window.localStorage.setItem('cookie-consent', value);
+    window.dispatchEvent(new Event(COOKIE_CONSENT_EVENT));
+  };
 
   const handleAccept = () => {
-    localStorage.setItem('cookie-consent', 'accepted');
-    setIsVisible(false);
+    setCookieConsent('accepted');
     // Load analytics and tracking scripts
     loadAnalyticsScripts();
   };
 
   const handleDecline = () => {
-    localStorage.setItem('cookie-consent', 'declined');
-    setIsVisible(false);
+    setCookieConsent('declined');
   };
 
   const loadAnalyticsScripts = () => {
@@ -32,7 +50,7 @@ export default function CookieBanner() {
     console.log('Analytics tracking enabled');
   };
 
-  if (!isClient || !isVisible) return null;
+  if (cookieConsent) return null;
 
   return (
     <div className="fixed inset-x-0 bottom-0 z-40 border-t border-slate-200 bg-white/95 p-4 shadow-lg backdrop-blur-sm dark:border-slate-700 dark:bg-slate-900/95 sm:p-6">
@@ -41,12 +59,12 @@ export default function CookieBanner() {
           <div className="flex-1">
             <p className="text-sm text-slate-700 dark:text-slate-300">
               We use cookies to improve your experience, remember preferences, and analyze site usage.
-              <button
-                onClick={() => window.location.href = '/privacy'}
+              <Link
+                href="/privacy"
                 className="ml-2 font-semibold text-blue-600 underline hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300"
               >
                 Learn more
-              </button>
+              </Link>
             </p>
           </div>
           <div className="flex flex-col gap-2 sm:flex-row sm:gap-3">

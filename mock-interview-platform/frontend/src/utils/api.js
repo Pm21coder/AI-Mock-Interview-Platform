@@ -54,7 +54,10 @@ export function invalidateAllSubscriptionCaches() {
 }
 
 const api = axios.create({
-  baseURL: process.env.NEXT_PUBLIC_API_URL || '',
+  // Keep browser requests same-origin. Next.js rewrites /api/* to the backend
+  // using NEXT_PUBLIC_API_URL, so this works for local development and
+  // deployments without exposing the browser to CORS origin differences.
+  baseURL: '',
   headers: {
     'Content-Type': 'application/json',
   },
