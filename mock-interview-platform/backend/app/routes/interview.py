@@ -167,7 +167,28 @@ def generate_questions():
 def analyze_answer():
     user_id = current_user_id()
     subscription_user_id = current_subscription_user_id()
-    data = request.get_json(silent=True) or {}
+
+    # Parse JSON safely and log lightweight request metadata to aid debugging
+    try:
+        data = request.get_json(silent=True) or {}
+    except Exception as parse_exc:
+        logger.warning('Failed to parse JSON body for analyze_answer: %s', parse_exc)
+        data = {}
+
+    # Log request summary (do not log large fields like video_data)
+    try:
+        keys = list(data.keys()) if isinstance(data, dict) else []
+        logger.info(
+            'analyze_answer request: user=%s session=%s content_length=%s keys=%s',
+            user_id,
+            data.get('session_id'),
+            request.content_length,
+            keys,
+        )
+    except Exception:
+        # Best effort logging — never let logging raise and crash the handler
+        logger.debug('analyze_answer: failed to record request metadata')
+
     question = data.get('question')
     answer = (data.get('answer') or '').strip()
     expected_answer = data.get('expected_answer', '')
