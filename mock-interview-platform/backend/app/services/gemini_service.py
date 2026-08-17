@@ -240,7 +240,34 @@ class GeminiService:
             questions = self._parse_json_response(text)
             if not isinstance(questions, list):
                 raise ValueError('Gemini returned questions in an invalid format')
-            return questions
+
+            # Gemini can return syntactically valid JSON that does not match
+            # the requested schema (for example, a list of strings or fewer
+            # items than requested). Validate it here so the route never
+            # calls `.get()` on an invalid item and returns a 500 response.
+            normalized_questions = []
+            for question in questions:
+                if not isinstance(question, dict):
+                    raise ValueError('Gemini returned a question in an invalid format')
+
+                question_text = question.get('question')
+                if not isinstance(question_text, str) or not question_text.strip():
+                    raise ValueError('Gemini returned a question without text')
+
+                expected_answer = question.get('expected_answer', '')
+                normalized_questions.append({
+                    'question': question_text.strip(),
+                    'expected_answer': (
+                        expected_answer.strip()
+                        if isinstance(expected_answer, str)
+                        else str(expected_answer)
+                    ),
+                })
+
+            if len(normalized_questions) < num_questions:
+                raise ValueError('Gemini returned fewer questions than requested')
+
+            return normalized_questions[:num_questions]
         except Exception as exc:
             elapsed = time.time() - start
             print(f'Error generating questions ({elapsed:.2f}s): {exc}')

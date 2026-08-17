@@ -2,7 +2,7 @@ from datetime import datetime
 from uuid import uuid4
 import logging
 
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, current_app, jsonify, request
 
 from app import mongo, limiter
 from app.config import Config
@@ -143,7 +143,11 @@ def generate_questions():
             'subscription': subscription,
         })
     except Exception as exc:
-        return jsonify({'error': str(exc)}), 500
+        logger.exception('Failed to generate questions for user %s', user_id)
+        return jsonify({
+            'error': 'Unable to generate interview questions. Please try again.',
+            'details': str(exc) if current_app.debug else None,
+        }), 500
 
 
 @interview_bp.route('/analyze-answer', methods=['POST'])

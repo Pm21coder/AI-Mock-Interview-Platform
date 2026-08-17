@@ -7,6 +7,7 @@ import toast from 'react-hot-toast';
 import { getQuestionCategories } from '../../../utils/api';
 import { useSubscription } from '../../../hooks/useSubscription';
 import { useInterviewSync } from '../../../hooks/useInterviewSync';
+import { canStartInterview } from '../../../utils/interviewQuota.mjs';
 
 export default function InterviewSetup() {
   const router = useRouter();
@@ -62,6 +63,18 @@ export default function InterviewSetup() {
 
     if (!formData.job_role) {
       toast.error('Please enter a job role');
+      return;
+    }
+
+    const quotaStatus = canStartInterview({
+      tier: subscription?.tier || planDetails.tier,
+      monthly_limit: subscription?.monthly_limit ?? planDetails.monthlyLimit,
+      interviews_remaining: subscription?.interviews_remaining ?? planDetails.interviewsRemaining,
+    });
+
+    if (!quotaStatus.allowed) {
+      toast.error(quotaStatus.message || 'Your monthly interview limit has been reached. Please upgrade your plan.');
+      router.replace('/subscription?upgrade_prompt=limit_reached');
       return;
     }
 
