@@ -1,4 +1,4 @@
-import axios from 'axios';
+﻿import axios from 'axios';
 
 // Simple in-memory cache with TTL for reducing duplicate API calls
 const apiCache = new Map();
@@ -341,7 +341,7 @@ export const createRazorpayOrder = async (data) => {
 
     // Provide specific context for Gateway errors
     if (status === 502) {
-      console.error('🔴 502 Bad Gateway Error: The upstream Python backend (Werkzeug) crashed or timed out.');
+      console.error('ðŸ”´ 502 Bad Gateway Error: The upstream Python backend (Werkzeug) crashed or timed out.');
       console.error('Backend may have encountered an unhandled exception. Check backend logs and .env configuration.');
       console.error('Common causes: Missing Razorpay credentials, API key issues, or MongoDB connection problems.');
     }
@@ -511,3 +511,4 @@ export const getFeedbackHistoryLimit = async () => {
   setCachedData(cacheKey, response.data, CACHE_TTL.features);
   return response.data;
 };
+
