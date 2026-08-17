@@ -201,77 +201,123 @@ export const login = async (credentials) => {
   return response.data;
 };
 
-export const getQuestions = async (params) => {
-  const maxAttempts = 2;
-  let attempt = 0;
-  let lastError = null;
-  let timeout = REQUEST_TIMEOUTS.interviewQuestions;
+// Helper to create a job and poll for completion
+async function createJobAndPoll(jobEndpoint, pollEndpointBase, payload, totalTimeout = REQUEST_TIMEOUTS.interviewQuestions) {
+  // Allow 202 responses without throwing
+  const createResp = await api.post(jobEndpoint, payload, {
+    timeout: Math.min(10_000, totalTimeout),
+    validateStatus: (status) => status < 500,
+  });
 
-  while (attempt < maxAttempts) {
-    try {
-      const response = await api.post('/api/interview/generate-questions', params, { timeout });
-      return response.data;
-    } catch (error) {
-      lastError = error;
-      const isTimeout = error?.code === 'ECONNABORTED' || error?.message?.toLowerCase?.().includes('timeout');
-      if (isTimeout) {
-        attempt += 1;
-        console.warn(`getQuestions attempt ${attempt} timed out (timeout=${timeout}ms).`);
-        if (attempt < maxAttempts) {
-          const backoffMs = 1000 * Math.pow(2, attempt - 1);
-          await new Promise((res) => setTimeout(res, backoffMs));
-          timeout = Math.min(timeout * 2, 180_000); // cap at 3 minutes
-          continue;
+  if (createResp.status === 202 && createResp.data?.job_id) {
+    const jobId = createResp.data.job_id;
+    const start = Date.now();
+    let interval = 1000; // 1s initial
+    while (Date.now() - start < totalTimeout) {
+      try {
+        const statusResp = await api.get(`${pollEndpointBase}/${jobId}`, { timeout: Math.min(10_000, totalTimeout), validateStatus: (s) => s < 500 });
+        if (statusResp.data?.status === 'completed') {
+          return statusResp.data.result;
         }
+        if (statusResp.data?.status === 'failed') {
+          throw new Error(statusResp.data?.error || 'Job failed');
+        }
+      } catch (pollErr) {
+        // Ignore transient poll errors but log for visibility
+        console.warn('Poll error for job', jobId, pollErr?.message || pollErr);
+      }
+      // Wait before next poll (exponential backoff)
+      await new Promise((res) => setTimeout(res, interval));
+      interval = Math.min(interval * 2, 10_000); // cap 10s
+    }
 
-        console.error('getQuestions API timeout after retry:', error?.message || error);
-        // Fallthrough to local fallback below
-      } else {
-        // Non-timeout error — log and break so we handle it below
-        logApiError('/api/interview/generate-questions', error);
-        break;
+    throw new Error('Job polling timed out');
+  }
+
+  // If server returned 200 with immediate result, return it
+  if (createResp.status === 200) return createResp.data;
+
+  throw new Error('Failed to create job');
+}
+
+export const getQuestions = async (params) => {
+  try {
+    // Prefer job-based generation to avoid HTTP timeouts for long LLM calls
+    const result = await createJobAndPoll('/api/interview/generate-questions-job', '/api/interview/job', params, REQUEST_TIMEOUTS.interviewQuestions);
+    // Normalize result shape if needed
+    if (result && result.questions) return result;
+    return result;
+  } catch (error) {
+    logApiError('/api/interview/generate-questions-job', error);
+
+    // Fall back to the original synchronous endpoint with a retry policy
+    const maxAttempts = 2;
+    let attempt = 0;
+    let lastError = null;
+    let timeout = REQUEST_TIMEOUTS.interviewQuestions;
+
+    while (attempt < maxAttempts) {
+      try {
+        const response = await api.post('/api/interview/generate-questions', params, { timeout });
+        return response.data;
+      } catch (err) {
+        lastError = err;
+        const isTimeout = err?.code === 'ECONNABORTED' || err?.message?.toLowerCase?.().includes('timeout');
+        if (isTimeout) {
+          attempt += 1;
+          console.warn(`getQuestions attempt ${attempt} timed out (timeout=${timeout}ms).`);
+          if (attempt < maxAttempts) {
+            const backoffMs = 1000 * Math.pow(2, attempt - 1);
+            await new Promise((res) => setTimeout(res, backoffMs));
+            timeout = Math.min(timeout * 2, 180_000); // cap at 3 minutes
+            continue;
+          }
+          console.error('getQuestions API timeout after retry:', err?.message || err);
+        } else {
+          logApiError('/api/interview/generate-questions', err);
+          break;
+        }
       }
     }
+
+    const err = lastError;
+    logApiError('/api/interview/generate-questions', err || new Error('Unknown error'));
+
+    const status = err?.response?.status;
+    if (!err?.response || (status && status >= 500)) {
+      console.warn('Using local fallback questions because interview API is unavailable.');
+      const fallbackQuestions = [
+        {
+          question: 'Tell me about a challenging bug you fixed. What was the root cause and how did you resolve it?',
+          category: params?.category || 'technical',
+          difficulty: params?.difficulty || 'medium',
+          expected_answer: 'Look for technical diagnosis, stepwise debugging, and learning outcome.',
+        },
+        {
+          question: 'Describe a time you led a project from idea to delivery. What obstacles did you face?',
+          category: params?.category || 'behavioral',
+          difficulty: params?.difficulty || 'medium',
+          expected_answer: 'Look for leadership, planning, stakeholder management, and results.',
+        },
+        {
+          question: 'How would you design a scalable notification system for millions of users?',
+          category: params?.category || 'system_design',
+          difficulty: params?.difficulty || 'hard',
+          expected_answer: 'Discuss queuing, delivery guarantees, backpressure, and horizontal scaling.',
+        },
+      ];
+
+      const requested = Number(params?.num_questions) || 3;
+      const count = Math.min(Math.max(1, requested), 10); // clamp between 1 and 10
+      return {
+        session_id: `local_fallback_${Date.now()}`,
+        questions: fallbackQuestions.slice(0, count),
+        fallback: true,
+      };
+    }
+
+    throw err;
   }
-
-  // At this point either we had a non-timeout error or timeout after retries
-  const error = lastError;
-  logApiError('/api/interview/generate-questions', error || new Error('Unknown error'));
-
-  const status = error?.response?.status;
-  if (!error?.response || (status && status >= 500)) {
-    console.warn('Using local fallback questions because interview API is unavailable.');
-    const fallbackQuestions = [
-      {
-        question: 'Tell me about a challenging bug you fixed. What was the root cause and how did you resolve it?',
-        category: params?.category || 'technical',
-        difficulty: params?.difficulty || 'medium',
-        expected_answer: 'Look for technical diagnosis, stepwise debugging, and learning outcome.',
-      },
-      {
-        question: 'Describe a time you led a project from idea to delivery. What obstacles did you face?',
-        category: params?.category || 'behavioral',
-        difficulty: params?.difficulty || 'medium',
-        expected_answer: 'Look for leadership, planning, stakeholder management, and results.',
-      },
-      {
-        question: 'How would you design a scalable notification system for millions of users?',
-        category: params?.category || 'system_design',
-        difficulty: params?.difficulty || 'hard',
-        expected_answer: 'Discuss queuing, delivery guarantees, backpressure, and horizontal scaling.',
-      },
-    ];
-
-    const requested = Number(params?.num_questions) || 3;
-    const count = Math.min(Math.max(1, requested), 10); // clamp between 1 and 10
-    return {
-      session_id: `local_fallback_${Date.now()}`,
-      questions: fallbackQuestions.slice(0, count),
-      fallback: true,
-    };
-  }
-
-  throw error;
 };
 
 export const submitAnswer = async (data) => {

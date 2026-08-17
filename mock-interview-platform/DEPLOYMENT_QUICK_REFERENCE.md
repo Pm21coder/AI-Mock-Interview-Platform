@@ -52,6 +52,13 @@ Use this for a fast deployment reference. Full guide: `VERCEL_AND_RENDER_DEPLOYM
    FLASK_DEBUG = False
    FRONTEND_URL = https://your-vercel-frontend.vercel.app (add after step 3)
    ENABLE_GEMINI = true
+
+   # If you plan to run long-running AI tasks or enable job-based processing,
+   # configure a Redis URL and run an RQ worker. Example:
+   REDIS_URL = redis://:<password>@redis-host:6379/0
+   # Start a worker on the backend host (or dedicated worker dyno/container):
+   #   cd mock-interview-platform && REDIS_URL=$REDIS_URL python backend/worker.py
+   # The backend will automatically enqueue jobs to Redis when REDIS_URL is set.
    ```
 5. Click Deploy
 

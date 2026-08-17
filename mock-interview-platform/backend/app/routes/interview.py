@@ -29,6 +29,97 @@ subscription_service = SubscriptionService()
 # this store lasts for the lifetime of the backend process.
 demo_sessions = {}
 
+# Prefer a Redis-backed queue (RQ) for background jobs in production.
+# Fall back to a simple in-process job store and threads for local/dev runs
+# when Redis is not configured or available.
+import os
+redis_conn = None
+rq_queue = None
+use_redis_queue = False
+try:
+    import redis
+    from rq import Queue, Job
+    redis_url = os.getenv('REDIS_URL')
+    if redis_url:
+        redis_conn = redis.from_url(redis_url)
+        rq_queue = Queue('default', connection=redis_conn)
+        use_redis_queue = True
+except Exception:
+    # Redis/RQ not available in the environment; fall back to in-process worker
+    redis_conn = None
+    rq_queue = None
+    use_redis_queue = False
+
+# In-process fallback job store (used when Redis is not configured)
+jobs = {}
+from threading import Thread, Lock
+jobs_lock = Lock()
+
+
+# Job worker functions (must be importable by RQ workers when using Redis)
+def run_generate_questions_job(payload):
+    """Background-friendly function that generates questions and returns a job result."""
+    try:
+        job_role = (payload.get('job_role') or '').strip()
+        category = (payload.get('category') or 'technical').strip().lower()
+        difficulty = (payload.get('difficulty') or 'medium').strip().lower()
+        num_questions = int(payload.get('num_questions', 5))
+
+        try:
+            generated = gemini_service.generate_questions(job_role, category, difficulty, num_questions)
+        except Exception as exc:
+            logger.exception('Gemini generate_questions (job) failed: %s', exc)
+            generated = gemini_service.get_fallback_questions(job_role, category, num_questions)
+
+        questions = [
+            InterviewQuestion(
+                q.get('question', 'Tell me about your experience'),
+                category,
+                difficulty,
+                q.get('expected_answer', ''),
+            ).to_dict()
+            for q in generated[:num_questions]
+        ]
+
+        result = {'session_id': str(uuid4()), 'questions': questions}
+        return {'status': 'completed', 'result': result}
+    except Exception as exc:
+        logger.exception('Question generation job failed: %s', exc)
+        return {'status': 'failed', 'error': str(exc)}
+
+
+def run_analyze_answer_job(payload):
+    """Background-friendly function that analyzes an answer and returns feedback."""
+    try:
+        question = payload.get('question')
+        answer = (payload.get('answer') or '').strip()
+        expected_answer = payload.get('expected_answer', '')
+
+        try:
+            is_premium = subscription_service.should_use_premium_ai_coaching(payload.get('user_id', 'guest'))
+        except Exception:
+            is_premium = False
+
+        try:
+            gemini_feedback = gemini_service.analyze_answer(question, answer, expected_answer, is_premium=is_premium)
+        except Exception as gem_exc:
+            logger.exception('Gemini analysis job failed: %s', gem_exc)
+            gemini_feedback = gemini_service.get_fallback_feedback(is_premium=is_premium, user_answer=answer, expected_answer=expected_answer)
+
+        try:
+            nlp_analysis = nlp_service.analyze_answer_quality(answer, expected_answer)
+        except Exception as nlp_exc:
+            logger.exception('NLP analysis job failed: %s', nlp_exc)
+            nlp_analysis = {'word_count': len(answer.split()), 'sentence_count': 0}
+
+        cv_analysis = {'average_confidence': 0.75, 'overall_assessment': 'No video analysis in job mode', 'total_frames_analyzed': 0}
+
+        combined_feedback = {'nlp_analysis': nlp_analysis, 'gemini_feedback': gemini_feedback, 'cv_analysis': cv_analysis, 'timestamp': utc_now().isoformat()}
+        return {'status': 'completed', 'result': combined_feedback}
+    except Exception as exc:
+        logger.exception('Analysis job failed: %s', exc)
+        return {'status': 'failed', 'error': str(exc)}
+
 
 def current_user_id():
     return str(request.current_user.get('_id', 'guest'))
@@ -159,6 +250,85 @@ def generate_questions():
             'error': 'Unable to generate interview questions. Please try again.',
             'details': str(exc) if current_app.debug else None,
         }), 500
+
+
+@interview_bp.route('/generate-questions-job', methods=['POST'])
+@token_required
+@limiter.limit("10 per minute")
+def generate_questions_job():
+        """Start a background job to generate questions and return a job_id immediately.
+        Client should poll /api/interview/job/<job_id> for status/result.
+        """
+        data = request.get_json(silent=True) or {}
+
+        if use_redis_queue and rq_queue is not None:
+            # Enqueue the job using RQ. The worker should import run_generate_questions_job
+            try:
+                job = rq_queue.enqueue('app.routes.interview.run_generate_questions_job', data)
+                response = jsonify({'job_id': job.get_id()})
+                response.status_code = 202
+                return response
+            except Exception as exc:
+                logger.exception('Failed to enqueue generate_questions job to Redis: %s', exc)
+                # Fall back to in-process job creation
+
+        # In-process fallback: populate jobs store and start a thread
+        job_id = str(uuid4())
+        job_record = {
+            'status': 'pending',
+            'result': None,
+            'error': None,
+            'started_at': datetime.utcnow().isoformat(),
+            'completed_at': None,
+        }
+        with jobs_lock:
+            jobs[job_id] = job_record
+
+        def _run_local_job(job_id_local, payload):
+            result = run_generate_questions_job(payload)
+            with jobs_lock:
+                if result.get('status') == 'completed':
+                    jobs[job_id_local]['status'] = 'completed'
+                    jobs[job_id_local]['result'] = result.get('result')
+                else:
+                    jobs[job_id_local]['status'] = 'failed'
+                    jobs[job_id_local]['error'] = result.get('error')
+                jobs[job_id_local]['completed_at'] = datetime.utcnow().isoformat()
+
+        thread = Thread(target=_run_local_job, args=(job_id, data), daemon=True)
+        thread.start()
+
+        response = jsonify({'job_id': job_id})
+        response.status_code = 202
+        return response
+
+
+@interview_bp.route('/job/<job_id>', methods=['GET'])
+@token_required
+def get_job_status(job_id):
+        # If Redis + RQ is configured, attempt to fetch the job status from Redis
+        if use_redis_queue and redis_conn is not None:
+            try:
+                from rq.job import Job
+                rq_job = Job.fetch(job_id, connection=redis_conn)
+                state = rq_job.get_status()  # queued, started, finished, failed, deferred, scheduled
+                if state in ('queued', 'deferred', 'started', 'scheduled'):
+                    return jsonify({'status': 'pending'})
+                if state == 'finished':
+                    return jsonify({'status': 'completed', 'result': rq_job.result})
+                if state == 'failed':
+                    # RQ stores exc info in exc_info
+                    return jsonify({'status': 'failed', 'error': str(rq_job.exc_info)}), 200
+                return jsonify({'status': state})
+            except Exception as exc:
+                logger.exception('Failed to fetch job status from Redis for %s: %s', job_id, exc)
+                # Fall through to in-process job store check
+
+        with jobs_lock:
+            job = jobs.get(job_id)
+        if not job:
+            return jsonify({'error': 'Job not found'}), 404
+        return jsonify(job)
 
 
 @interview_bp.route('/analyze-answer', methods=['POST'])
@@ -295,6 +465,47 @@ def analyze_answer():
             'error': 'Failed to analyze answer. Please try again.',
             'details': None,
         }), 500
+
+
+@interview_bp.route('/analyze-answer-job', methods=['POST'])
+@token_required
+@limiter.limit("20 per minute")
+def analyze_answer_job():
+        """Start a background job to analyze an answer and return a job_id. Client polls /api/interview/job/<job_id>"""
+        data = request.get_json(silent=True) or {}
+
+        if use_redis_queue and rq_queue is not None:
+            try:
+                job = rq_queue.enqueue('app.routes.interview.run_analyze_answer_job', data)
+                response = jsonify({'job_id': job.get_id()})
+                response.status_code = 202
+                return response
+            except Exception as exc:
+                logger.exception('Failed to enqueue analyze_answer job to Redis: %s', exc)
+                # Fall back to in-process job creation
+
+        job_id = str(uuid4())
+        job_record = {'status': 'pending', 'result': None, 'error': None, 'started_at': datetime.utcnow().isoformat(), 'completed_at': None}
+        with jobs_lock:
+            jobs[job_id] = job_record
+
+        def _run_local_analysis(job_id_local, payload):
+            result = run_analyze_answer_job(payload)
+            with jobs_lock:
+                if result.get('status') == 'completed':
+                    jobs[job_id_local]['status'] = 'completed'
+                    jobs[job_id_local]['result'] = result.get('result')
+                else:
+                    jobs[job_id_local]['status'] = 'failed'
+                    jobs[job_id_local]['error'] = result.get('error')
+                jobs[job_id_local]['completed_at'] = datetime.utcnow().isoformat()
+
+        thread = Thread(target=_run_local_analysis, args=(job_id, data), daemon=True)
+        thread.start()
+
+        response = jsonify({'job_id': job_id})
+        response.status_code = 202
+        return response
 
 
 @interview_bp.route('/get-feedback/<session_id>', methods=['GET'])
