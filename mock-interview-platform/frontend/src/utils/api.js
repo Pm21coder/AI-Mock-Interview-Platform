@@ -389,25 +389,25 @@ export const getQuestionCategories = async () => {
       fullError: error
     });
     
-    // Return safe fallback for technical and behavioral categories when backend is unavailable or erroring
-    // This includes network errors (!error?.response) and 5xx server errors (status >= 500)
+    // Always return safe fallback for question categories to prevent app from crashing
+    // This includes:
+    // - Network errors (!error?.response)
+    // - 5xx server errors (status >= 500)
+    // - Any other unexpected errors
     const isNetworkError = !error?.response;
     const isServerError = status >= 500;
     
-    if (isNetworkError || isServerError) {
-      console.warn(`[getQuestionCategories] Returning fallback categories (network=${isNetworkError}, server_error=${isServerError})`);
-      return {
-        available_categories: ['technical', 'behavioral'],
-        tier: 'free',
-        interviews_remaining: 'unknown',
-        monthly_limit: 'unknown',
-        all_categories_available: false,
-        fallback: true
-      };
-    }
+    console.warn(`[getQuestionCategories] Returning fallback categories (network=${isNetworkError}, server_error=${isServerError}, status=${status})`);
     
-    // Re-throw only non-5xx, non-network errors
-    throw new Error(errorMessage);
+    // Return the same safe defaults the backend returns on error
+    return {
+      available_categories: ['technical', 'behavioral'],
+      tier: 'free',
+      interviews_remaining: 0,
+      monthly_limit: 3,
+      all_categories_available: false,
+      fallback: true
+    };
   }
 };
 

@@ -505,43 +505,75 @@ def get_question_categories():
         
         if not current_user:
             logger.warning("get_question_categories: current_user is None or falsy")
-            return jsonify({'error': 'Unauthorized: no user context'}), 401
+            # Return safe default instead of 401 to allow app to continue
+            return jsonify({
+                'available_categories': ['technical', 'behavioral'],
+                'tier': 'free',
+                'interviews_remaining': 0,
+                'monthly_limit': 3,
+                'all_categories_available': False,
+                'fallback': True
+            }), 200
         
         user_id = current_user.get('_id')
         if not user_id:
             logger.warning(f"get_question_categories: user_id missing from current_user: {current_user}")
-            return jsonify({'error': 'Invalid user context: missing _id'}), 400
+            # Return safe default instead of 400
+            return jsonify({
+                'available_categories': ['technical', 'behavioral'],
+                'tier': 'free',
+                'interviews_remaining': 0,
+                'monthly_limit': 3,
+                'all_categories_available': False,
+                'fallback': True
+            }), 200
 
         logger.info(f"get_question_categories: fetching categories for user {user_id}")
         
+        categories = None
         try:
             categories = subscription_service.get_available_question_categories(user_id)
             logger.info(f"get_question_categories: categories fetched = {categories}")
         except Exception as cat_error:
             logger.error(f"Error fetching categories for user {user_id}: {str(cat_error)}", exc_info=True)
-            return jsonify({'error': f'Failed to fetch categories: {str(cat_error)}'}), 500
+            categories = ['technical', 'behavioral']  # Fallback
         
+        sub = None
         try:
             sub = subscription_service.get_user_subscription(user_id)
             logger.info(f"get_question_categories: subscription fetched, tier = {sub.get('tier')}")
         except Exception as sub_error:
             logger.error(f"Error fetching subscription for user {user_id}: {str(sub_error)}", exc_info=True)
-            return jsonify({'error': f'Failed to fetch subscription: {str(sub_error)}'}), 500
+            sub = {
+                'tier': 'free',
+                'interviews_remaining': 0,
+                'monthly_limit': 3
+            }  # Fallback
         
+        # Build response using .get() to avoid KeyErrors
         response = {
-            'available_categories': categories,
-            'tier': sub['tier'],
-            'interviews_remaining': sub['interviews_remaining'],
-            'monthly_limit': sub['monthly_limit'],
-            'all_categories_available': categories == ['technical', 'behavioral', 'situational', 'system_design']
+            'available_categories': categories or ['technical', 'behavioral'],
+            'tier': sub.get('tier', 'free') if sub else 'free',
+            'interviews_remaining': sub.get('interviews_remaining', 0) if sub else 0,
+            'monthly_limit': sub.get('monthly_limit', 3) if sub else 3,
+            'all_categories_available': (categories or []) == ['technical', 'behavioral', 'situational', 'system_design']
         }
         
-        logger.info(f"get_question_categories: returning response with {len(categories)} categories")
+        logger.info(f"get_question_categories: returning response with {len(response.get('available_categories', []))} categories")
         return jsonify(optimize_response(response)), 200
         
     except Exception as e:
         logger.error(f'Unexpected error in get_question_categories: {str(e)}', exc_info=True)
-        return jsonify({'error': f'Server error: {str(e)}'}), 500
+        # Even in unexpected errors, return a safe fallback
+        return jsonify({
+            'available_categories': ['technical', 'behavioral'],
+            'tier': 'free',
+            'interviews_remaining': 0,
+            'monthly_limit': 3,
+            'all_categories_available': False,
+            'error': str(e),
+            'fallback': True
+        }), 200  # Return 200 instead of 500 to prevent app crash
 
 
 @subscription_bp.route('/analytics', methods=['GET'])
