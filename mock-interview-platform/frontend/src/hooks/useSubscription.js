@@ -144,7 +144,26 @@ export function useSubscription() {
       void fetchSubscription();
     }, CACHE_DURATION);
 
-    return () => window.clearInterval(interval);
+    const refreshOnResume = () => {
+      if (document.visibilityState === 'visible') {
+        void fetchSubscription();
+      }
+    };
+
+    const handlePageShow = () => {
+      void fetchSubscription();
+    };
+
+    document.addEventListener('visibilitychange', refreshOnResume);
+    window.addEventListener('pageshow', handlePageShow);
+    window.addEventListener('focus', handlePageShow);
+
+    return () => {
+      window.clearInterval(interval);
+      document.removeEventListener('visibilitychange', refreshOnResume);
+      window.removeEventListener('pageshow', handlePageShow);
+      window.removeEventListener('focus', handlePageShow);
+    };
   }, [fetchSubscription, isAuthenticated]);
 
   return {

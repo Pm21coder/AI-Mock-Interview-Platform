@@ -26,16 +26,34 @@ function getSpeechErrorMessage(error) {
 
 function getQuestionLoadError(error) {
   const responseData = error.response?.data || {};
+  const responseMessage = typeof responseData === 'string' ? responseData : (
+    responseData.message || responseData.error || responseData.detail || responseData.details || ''
+  );
   const isPlanRestriction = error.response?.status === 403 && (
     responseData.code === 'interview_limit_reached' ||
     responseData.code === 'category_not_in_plan' ||
     Boolean(responseData.required_tier)
   );
 
+  if (error.response?.status === 401) {
+    return {
+      isPlanRestriction: false,
+      message: 'Your session has expired. Please sign in again to start a new interview.',
+      errorCode: 'session_expired',
+    };
+  }
+
+  if (!error.response) {
+    return {
+      isPlanRestriction: false,
+      message: 'Unable to connect to the interview service. Please check your connection and try again.',
+      errorCode: 'network_error',
+    };
+  }
+
   return {
     isPlanRestriction,
-    message: responseData.message || responseData.error ||
-      'Failed to load interview questions. Please try again.',
+    message: responseMessage || 'Failed to load interview questions. Please try again.',
     errorCode: responseData.code || null,
   };
 }
@@ -329,26 +347,28 @@ function InterviewSessionContent() {
       } catch (error) {
         const questionLoadError = getQuestionLoadError(error);
 
-        // The backend is the authority for quota checks. Redirect immediately
-        // instead of leaving the user on a failed session while a timer runs.
         if (questionLoadError.errorCode === 'interview_limit_reached') {
           invalidateSubscriptionCache();
           router.replace('/subscription?upgrade_prompt=limit_reached');
           return;
         }
 
+        if (questionLoadError.errorCode === 'session_expired') {
+          router.replace('/auth?next=/interview/setup');
+          return;
+        }
+
         setLoadError(questionLoadError.message);
         setErrorCode(questionLoadError.errorCode);
         setCanUpgradeForLoadError(questionLoadError.isPlanRestriction);
-        
-        // Show modal for limit/restriction errors, toast for others
+
         if (questionLoadError.isPlanRestriction) {
           setShowLimitModal(true);
         } else {
           toast.error(questionLoadError.message, { duration: 5000 });
         }
 
-        if (!error.response || error.response.status >= 500) {
+        if (!error.response || error.response.status >= 500 || error.code === 'ERR_NETWORK') {
           console.error('Failed to load interview questions:', error);
         }
       }
