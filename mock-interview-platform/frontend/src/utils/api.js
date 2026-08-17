@@ -15,11 +15,12 @@ const REQUEST_TIMEOUTS = {
   subscriptionStatus: 8_000,
   questionCategories: 8_000,
   createOrder: 15_000,
-  // Reduce question generation timeout to keep the UI responsive when the AI
-  // provider is slow. 15s is a reasonable compromise between quality and UX.
-  interviewQuestions: 15_000,
+  // Allow longer AI generation time in environments with higher server limits.
+  // 30s matches common serverless function timeouts and avoids premature client
+  // aborts while still keeping the UI responsive.
+  interviewQuestions: 30_000,
   // Client-side timeout for answer analysis. Keep slightly shorter than server limits
-  interviewAnalysis: 25_000,
+  interviewAnalysis: 30_000,
 };
 
 function responseBodyForLog(error) {
@@ -67,6 +68,13 @@ function logApiError(endpoint, error) {
     }
   } catch (e) {
     serialized.headers = null;
+  }
+
+  // Enrich messages for common failure modes (timeouts and server crashes)
+  if (serialized.code === 'ECONNABORTED' || (serialized.message && serialized.message.toLowerCase().includes('timeout'))) {
+    serialized.human_readable = 'Request timed out. The server or AI provider may be slow.';
+  } else if (serialized.status === 500) {
+    serialized.human_readable = 'Server error (500). Check backend logs for stack trace.';
   }
 
   // Print a stable, serialized representation so TurboPack/DevTools show details
