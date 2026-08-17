@@ -15,6 +15,7 @@ const REQUEST_TIMEOUTS = {
   subscriptionStatus: 8_000,
   questionCategories: 8_000,
   createOrder: 15_000,
+  interviewQuestions: 45_000,
 };
 
 function responseBodyForLog(error) {
@@ -96,6 +97,7 @@ const api = axios.create({
   // using NEXT_PUBLIC_API_URL, so this works for local development and
   // deployments without exposing the browser to CORS origin differences.
   baseURL: '',
+  timeout: 45_000,
   headers: {
     'Content-Type': 'application/json',
   },
@@ -149,7 +151,9 @@ export const login = async (credentials) => {
 };
 
 export const getQuestions = async (params) => {
-  const response = await api.post('/api/interview/generate-questions', params);
+  const response = await api.post('/api/interview/generate-questions', params, {
+    timeout: REQUEST_TIMEOUTS.interviewQuestions,
+  });
   return response.data;
 };
 

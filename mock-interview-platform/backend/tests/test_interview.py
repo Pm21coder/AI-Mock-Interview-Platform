@@ -1,3 +1,4 @@
+import time
 from unittest import TestCase
 from unittest.mock import patch
 from datetime import timedelta
@@ -186,6 +187,17 @@ class SubscriptionFallbackTests(TestCase):
 
 
 class GeminiFallbackTests(TestCase):
+    def test_run_with_timeout_uses_the_configured_deadline(self):
+        start = time.time()
+
+        with self.assertRaises(TimeoutError):
+            GeminiService.run_with_timeout(
+                lambda: (time.sleep(0.2), 'done'),
+                timeout_seconds=0.05,
+            )
+
+        self.assertLess(time.time() - start, 0.2)
+
     def test_question_fallback_returns_the_requested_number_of_questions(self):
         questions = GeminiService().get_fallback_questions(
             'Software Engineer',

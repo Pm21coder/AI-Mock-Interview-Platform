@@ -1,5 +1,6 @@
 import json
 import re
+import threading
 import time
 
 try:
@@ -28,6 +29,30 @@ class GeminiService:
         'gemini-3.6-flash',      # Latest model (higher quota use)
         'gemini-flash-latest',   # Generic latest model fallback
     )
+
+    @staticmethod
+    def run_with_timeout(func, timeout_seconds, *args, **kwargs):
+        """Execute a blocking call with a hard timeout and surface TimeoutError."""
+        result = {}
+        error = {}
+
+        def runner():
+            try:
+                result['value'] = func(*args, **kwargs)
+            except Exception as exc:  # pragma: no cover - branch is exercised in tests
+                error['value'] = exc
+
+        thread = threading.Thread(target=runner, daemon=True)
+        thread.start()
+        thread.join(timeout_seconds)
+
+        if thread.is_alive():
+            raise TimeoutError(f'Operation timed out after {timeout_seconds} seconds')
+        if 'value' in result:
+            return result['value']
+        if 'value' in error:
+            raise error['value']
+        raise RuntimeError('Execution finished without producing a result')
 
     @staticmethod
     def normalize_model_name(model_name):
@@ -231,7 +256,13 @@ class GeminiService:
 
         start = time.time()
         try:
-            text = self._generate_json(prompt, max_output_tokens=2048)
+            timeout_seconds = max(float(Config.GEMINI_TIMEOUT_SECONDS), 5.0)
+            text = self.run_with_timeout(
+                self._generate_json,
+                timeout_seconds,
+                prompt,
+                2048,
+            )
             elapsed = time.time() - start
             print(f'GeminiService.generate_questions: got response in {elapsed:.2f}s; text_len={len(text)}')
             if not text:
@@ -318,7 +349,13 @@ class GeminiService:
 
         start = time.time()
         try:
-            text = self._generate_json(prompt, max_output_tokens=2048 if is_premium else 1024)
+            timeout_seconds = max(float(Config.GEMINI_TIMEOUT_SECONDS), 5.0)
+            text = self.run_with_timeout(
+                self._generate_json,
+                timeout_seconds,
+                prompt,
+                2048 if is_premium else 1024,
+            )
             elapsed = time.time() - start
             print(f'GeminiService.analyze_answer: got response in {elapsed:.2f}s; text_len={len(text)}')
             if not text:
