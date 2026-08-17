@@ -159,19 +159,41 @@ export const getDashboardStats = async () => {
     // API container is unavailable. Fall back to the same guest dashboard data
     // used by the server so the dashboard continues to render instead of
     // surfacing a raw Axios "Network Error" in the browser console.
-    // Log the original Axios error first. Serialising only selected response
-    // properties hides useful details when the request has no response (for
-    // example, a connection reset) and previously resulted in an unhelpful
-    // empty object in DevTools.
-    console.error('getDashboardStats error:', error);
-    console.error('getDashboardStats response:', {
-      status: error.response?.status,
-      statusText: error.response?.statusText,
-      message: error.response?.data?.error || error.message,
-      details: error.response?.data?.details,
-      url: error.config?.url,
-      code: error.code,
-    });
+    // Axios Error properties are non-enumerable, which TurboPack can render
+    // as `{}`. Build a plain object and preserve Axios' diagnostic payload so
+    // response and network failures remain distinguishable in DevTools.
+    const serializedError = typeof error?.toJSON === 'function'
+      ? error.toJSON()
+      : null;
+    const serializedHeaders = serializedError?.config?.headers;
+    if (serializedHeaders && typeof serializedHeaders === 'object') {
+      const safeHeaders = Object.fromEntries(
+        Object.entries(serializedHeaders).map(([name, value]) => [
+          name,
+          ['authorization', 'cookie', 'proxy-authorization', 'x-api-key'].includes(name.toLowerCase())
+            ? '[REDACTED]'
+            : value,
+        ]),
+      );
+      serializedError.config = {
+        ...serializedError.config,
+        headers: safeHeaders,
+      };
+    }
+
+    const errorDetails = {
+      message: error?.message || serializedError?.message || 'Unknown request error',
+      status: error?.response?.status ?? serializedError?.status,
+      statusText: error?.response?.statusText,
+      data: error?.response?.data,
+      code: error?.code,
+      method: error?.config?.method,
+      url: error?.config?.url,
+    };
+    console.error('getDashboardStats error:', errorDetails);
+    if (serializedError) {
+      console.debug('getDashboardStats Axios error:', serializedError);
+    }
     
     if (!error?.response) {
       console.warn('Dashboard stats API unavailable (network error), using guest fallback payload.', error?.message || error);
