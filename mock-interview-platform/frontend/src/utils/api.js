@@ -159,10 +159,18 @@ export const getDashboardStats = async () => {
     // API container is unavailable. Fall back to the same guest dashboard data
     // used by the server so the dashboard continues to render instead of
     // surfacing a raw Axios "Network Error" in the browser console.
-    console.error('getDashboardStats error:', {
+    // Log the original Axios error first. Serialising only selected response
+    // properties hides useful details when the request has no response (for
+    // example, a connection reset) and previously resulted in an unhelpful
+    // empty object in DevTools.
+    console.error('getDashboardStats error:', error);
+    console.error('getDashboardStats response:', {
       status: error.response?.status,
+      statusText: error.response?.statusText,
       message: error.response?.data?.error || error.message,
-      details: error.response?.data?.details
+      details: error.response?.data?.details,
+      url: error.config?.url,
+      code: error.code,
     });
     
     if (!error?.response) {
