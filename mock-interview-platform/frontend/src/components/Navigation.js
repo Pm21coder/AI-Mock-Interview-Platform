@@ -187,6 +187,13 @@ export default function Navigation() {
                   {link.label}
                 </Link>
               ))}
+              <Link
+                href="/contact"
+                className={isDarkTheme ? 'block w-full rounded-lg bg-gradient-to-r from-blue-600 to-indigo-600 px-4 py-2 mt-2 text-center text-sm font-medium text-white transition hover:brightness-110' : 'block w-full rounded-lg bg-gradient-to-r from-blue-600 to-indigo-600 px-4 py-2 mt-2 text-center text-sm font-medium text-white transition hover:brightness-110'}
+                onClick={closeMenu}
+              >
+                Contact Us
+              </Link>
             </div>
 
             <div className={isDarkTheme ? 'space-y-2 border-t border-white/10 px-2 py-3' : 'space-y-2 border-t border-gray-200 px-2 py-3'}>

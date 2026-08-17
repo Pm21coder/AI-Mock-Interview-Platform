@@ -496,10 +496,15 @@ def check_feature_access(feature_name):
 @token_required
 def get_question_categories():
     """Get available question categories for the user's subscription tier"""
-    current_user = _get_current_user()
-    user_id = current_user['_id']
-
     try:
+        current_user = _get_current_user()
+        if not current_user:
+            return jsonify({'error': 'Unauthorized'}), 401
+        
+        user_id = current_user.get('_id')
+        if not user_id:
+            return jsonify({'error': 'Invalid user'}), 400
+
         categories = subscription_service.get_available_question_categories(user_id)
         sub = subscription_service.get_user_subscription(user_id)
         
@@ -513,7 +518,10 @@ def get_question_categories():
         
         return jsonify(optimize_response(response)), 200
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error(f'Error in get_question_categories: {str(e)}', exc_info=True)
+        return jsonify({'error': 'Failed to load question categories. Please try again.'}), 500
 
 
 @subscription_bp.route('/analytics', methods=['GET'])
