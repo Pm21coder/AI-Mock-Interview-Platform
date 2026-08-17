@@ -378,26 +378,24 @@ export const getQuestionCategories = async () => {
     setCachedData(cacheKey, response.data, CACHE_TTL.questionCategories);
     return response.data;
   } catch (error) {
-    const status = error?.response?.status;
-    const errorMessage = error?.response?.data?.error || error?.message || 'Failed to load question categories';
-    
-    console.error('[getQuestionCategories] Error:', {
-      status,
-      message: errorMessage,
-      details: error?.response?.data?.details || 'No additional details',
-      serverMessage: error?.response?.data,
-      fullError: error
-    });
-    
     // Always return safe fallback for question categories to prevent app from crashing
-    // This includes:
-    // - Network errors (!error?.response)
-    // - 5xx server errors (status >= 500)
-    // - Any other unexpected errors
-    const isNetworkError = !error?.response;
-    const isServerError = status >= 500;
-    
-    console.warn(`[getQuestionCategories] Returning fallback categories (network=${isNetworkError}, server_error=${isServerError}, status=${status})`);
+    try {
+      const status = error?.response?.status;
+      const errorMessage = error?.response?.data?.error || error?.message || 'Failed to load question categories';
+      const errorDetails = {
+        status,
+        message: errorMessage,
+        details: error?.response?.data?.details,
+      };
+      
+      const isNetworkError = !error?.response;
+      const isServerError = status >= 500;
+      
+      console.warn(`[getQuestionCategories] API failed (network=${isNetworkError}, status=${status}), using fallback`);
+      if (error?.message) console.debug('[getQuestionCategories] Error details:', errorDetails);
+    } catch (logError) {
+      console.debug('[getQuestionCategories] Could not log error details:', logError);
+    }
     
     // Return the same safe defaults the backend returns on error
     return {

@@ -47,7 +47,8 @@ export default function InterviewSetup() {
             : { ...prev, category: categories[0] || 'technical' }
         ));
       } catch (error) {
-        console.error('Failed to load question categories:', error);
+        console.warn('Error loading question categories, using defaults:', error?.message);
+        // Fallback is already handled in getQuestionCategories(), so just use defaults
         setAvailableCategories(['technical', 'behavioral']);
       } finally {
         setLoadingCategories(false);

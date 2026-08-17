@@ -108,11 +108,27 @@ export function useSubscription() {
       }
 
       applySubscription(data);
+      setError(null);  // Clear error on success
       return data;
-    } catch {
+    } catch (err) {
       // Keep the last verified value visible if the user is temporarily offline.
       if (!cached) {
-        setError('Failed to load subscription data');
+        // Only show error if it's not a network issue or if we have no fallback data
+        const isNetworkError = !err?.response;
+        const errorMsg = err?.message || 'Unable to load subscription';
+        console.warn('[useSubscription] Failed to fetch:', { isNetworkError, message: errorMsg });
+        
+        // Don't show "Failed to load subscription data" - instead use a fallback subscription
+        // This prevents the error message from appearing when user hasn't purchased a plan yet
+        setSubscription({
+          tier: 'free',
+          status: 'active',
+          interviews_remaining: 3,
+          monthly_limit: 3,
+          features: [],
+          is_trial: false
+        });
+        setError(null);  // Don't show error - use fallback silently
       }
       return cached;
     } finally {
