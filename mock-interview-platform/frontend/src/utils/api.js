@@ -16,11 +16,10 @@ const REQUEST_TIMEOUTS = {
   questionCategories: 8_000,
   createOrder: 15_000,
   // Allow longer AI generation time in environments with higher server limits.
-  // 30s matches common serverless function timeouts and avoids premature client
-  // aborts while still keeping the UI responsive.
-  interviewQuestions: 30_000,
-  // Client-side timeout for answer analysis. Keep slightly shorter than server limits
-  interviewAnalysis: 30_000,
+  // Increase to 90s for question generation which can be expensive.
+  interviewQuestions: 90_000,
+  // Client-side timeout for answer analysis. Allow up to 90s for complex analysis.
+  interviewAnalysis: 90_000,
 };
 
 function responseBodyForLog(error) {
@@ -252,53 +251,76 @@ export const getQuestions = async (params) => {
 };
 
 export const submitAnswer = async (data) => {
-  try {
-    const response = await api.post('/api/interview/analyze-answer', data, {
-      timeout: REQUEST_TIMEOUTS.interviewAnalysis,
-    });
-    return response.data;
-  } catch (error) {
-    // Distinguish timeout errors and return a friendlier message
-    if (error?.code === 'ECONNABORTED' || error?.message?.toLowerCase?.().includes('timeout')) {
-      console.error('submitAnswer API timeout:', error?.message || error);
-      return {
-        error: 'Analysis timed out',
-        details: 'The analysis service is taking too long. Try again or reduce response length.',
-      };
-    }
+  const maxAttempts = 2;
+  let attempt = 0;
+  let lastError = null;
+  let timeout = REQUEST_TIMEOUTS.interviewAnalysis;
 
-    let errorPayload = error.response?.data;
-
-    console.error('submitAnswer API error:', error);
-    if (error.response) {
-      console.error('submitAnswer server response (raw):', errorPayload);
-    }
-
-    // If server returned a string payload, try to parse JSON out of it
-    if (typeof errorPayload === 'string') {
-      try {
-        const parsed = JSON.parse(errorPayload);
-        if (parsed && typeof parsed === 'object') {
-          return parsed;
+  while (attempt < maxAttempts) {
+    try {
+      const response = await api.post('/api/interview/analyze-answer', data, { timeout });
+      return response.data;
+    } catch (error) {
+      lastError = error;
+      // If timeout, attempt an exponential backoff retry once with a longer timeout
+      const isTimeout = error?.code === 'ECONNABORTED' || error?.message?.toLowerCase?.().includes('timeout');
+      if (isTimeout) {
+        attempt += 1;
+        console.warn(`submitAnswer attempt ${attempt} timed out (timeout=${timeout}ms).`);
+        if (attempt < maxAttempts) {
+          // Wait with exponential backoff before retrying
+          const backoffMs = 1000 * Math.pow(2, attempt - 1);
+          await new Promise((res) => setTimeout(res, backoffMs));
+          // Increase timeout for retry but cap at 120s
+          timeout = Math.min(timeout * 2, 120_000);
+          continue;
         }
-      } catch (e) {
-        // Not JSON  fall through and return a structured error
+
+        console.error('submitAnswer API timeout after retry:', error?.message || error);
         return {
-          error: 'Server error',
-          details: errorPayload,
+          error: 'Analysis timed out',
+          details: 'The analysis service is taking too long. Try again later or shorten the response.',
         };
       }
-    }
 
-    if (errorPayload && typeof errorPayload === 'object') {
-      return errorPayload;
+      // Non-timeout errors — break and handle below
+      break;
     }
-
-    return {
-      error: 'Failed to connect to analysis service',
-      details: error.message || 'Unable to reach the interview analysis service.',
-    };
   }
+
+  // If we reach here, handle the last non-timeout error similarly to previous behavior
+  const error = lastError;
+  let errorPayload = error?.response?.data;
+
+  console.error('submitAnswer API error:', error);
+  if (error?.response) {
+    console.error('submitAnswer server response (raw):', errorPayload);
+  }
+
+  // If server returned a string payload, try to parse JSON out of it
+  if (typeof errorPayload === 'string') {
+    try {
+      const parsed = JSON.parse(errorPayload);
+      if (parsed && typeof parsed === 'object') {
+        return parsed;
+      }
+    } catch (e) {
+      // Not JSON — fall through and return a structured error
+      return {
+        error: 'Server error',
+        details: errorPayload,
+      };
+    }
+  }
+
+  if (errorPayload && typeof errorPayload === 'object') {
+    return errorPayload;
+  }
+
+  return {
+    error: 'Failed to connect to analysis service',
+    details: error?.message || 'Unable to reach the interview analysis service.',
+  };
 };
 
 export const getFeedback = async (sessionId) => {
