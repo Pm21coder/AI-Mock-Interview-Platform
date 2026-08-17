@@ -9,6 +9,32 @@ import { useSubscription } from '../../../hooks/useSubscription';
 import { useInterviewSync } from '../../../hooks/useInterviewSync';
 import { canStartInterview } from '../../../utils/interviewQuota.mjs';
 
+function getAllowedCategoriesFromStorage() {
+  if (typeof window === 'undefined') {
+    return ['technical', 'behavioral'];
+  }
+
+  try {
+    const raw = window.localStorage.getItem('subscription_data');
+    if (!raw) {
+      return ['technical', 'behavioral'];
+    }
+
+    const parsed = JSON.parse(raw);
+    const subscriptionData = parsed?.data || parsed || {};
+    const features = subscriptionData.features || {};
+    const hasAllCategories = Boolean(
+      features.all_question_categories ?? subscriptionData.all_question_categories ?? false,
+    );
+
+    return hasAllCategories
+      ? ['technical', 'behavioral', 'situational', 'system_design']
+      : ['technical', 'behavioral'];
+  } catch {
+    return ['technical', 'behavioral'];
+  }
+}
+
 export default function InterviewSetup() {
   const router = useRouter();
   const { subscription, loading: subscriptionLoading, refetch } = useSubscription();
@@ -79,8 +105,10 @@ export default function InterviewSetup() {
       return;
     }
 
-    if (!availableCategories.includes(formData.category)) {
-      toast.error('This category is not available on your current plan.');
+    const allowedCategories = (availableCategories.length > 0 ? availableCategories : getAllowedCategoriesFromStorage());
+    if (!allowedCategories.includes(formData.category)) {
+      toast.error('This category is not available on your current plan. Upgrade to unlock more interview categories.');
+      router.replace('/subscription');
       return;
     }
 

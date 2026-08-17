@@ -24,6 +24,32 @@ function getSpeechErrorMessage(error) {
   return messages[error] || `Voice input stopped (${error || 'unknown error'}). Please try again.`;
 }
 
+function getAllowedCategoriesFromStorage() {
+  if (typeof window === 'undefined') {
+    return ['technical', 'behavioral'];
+  }
+
+  try {
+    const raw = window.localStorage.getItem('subscription_data');
+    if (!raw) {
+      return ['technical', 'behavioral'];
+    }
+
+    const parsed = JSON.parse(raw);
+    const subscriptionData = parsed?.data || parsed || {};
+    const features = subscriptionData.features || {};
+    const hasAllCategories = Boolean(
+      features.all_question_categories ?? subscriptionData.all_question_categories ?? false,
+    );
+
+    return hasAllCategories
+      ? ['technical', 'behavioral', 'situational', 'system_design']
+      : ['technical', 'behavioral'];
+  } catch {
+    return ['technical', 'behavioral'];
+  }
+}
+
 function getQuestionLoadError(error) {
   const responseData = error.response?.data || {};
   const responseMessage = typeof responseData === 'string' ? responseData : (
@@ -328,6 +354,26 @@ function InterviewSessionContent() {
 
       setLoadError('');
       setCanUpgradeForLoadError(false);
+
+      const allowedCategories = getAllowedCategoriesFromStorage();
+      if (!allowedCategories.includes(category)) {
+        const error = {
+          response: {
+            status: 403,
+            data: {
+              code: 'category_not_in_plan',
+              message: 'This question category is not available on your current plan.',
+              required_tier: 'basic',
+            },
+          },
+        };
+        const questionLoadError = getQuestionLoadError(error);
+        setLoadError(questionLoadError.message);
+        setErrorCode(questionLoadError.errorCode);
+        setCanUpgradeForLoadError(questionLoadError.isPlanRestriction);
+        setShowLimitModal(true);
+        return;
+      }
 
       try {
         const data = await getQuestions({
