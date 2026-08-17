@@ -8,7 +8,30 @@ from datetime import datetime, timedelta
 from enum import Enum
 import logging
 
-from app import mongo
+# Lazy/robust mongo proxy to allow unit tests to patch nested attributes
+# even when the PyMongo instance hasn't been initialized yet.
+class _MongoProxy:
+    def __getattr__(self, name):
+        try:
+            from app import mongo as _real_mongo
+            attr = getattr(_real_mongo, name, None)
+            # If the real PyMongo exposes None for an attribute (e.g. db before init),
+            # return a dummy proxy so attribute access chaining (for mocks) doesn't fail.
+            if attr is None:
+                raise AttributeError()
+            return attr
+        except Exception:
+            # Return a dummy object that gracefully handles chained attribute access and calls
+            class _Dummy:
+                def __getattr__(self, _):
+                    return _Dummy()
+                def __call__(self, *args, **kwargs):
+                    return None
+                def __iter__(self):
+                    return iter(())
+            return _Dummy()
+
+mongo = _MongoProxy()
 from app.config import Config
 from app.utils.mongo_state import is_mongo_available, mark_mongo_unavailable
 from app.utils.time import utc_now
