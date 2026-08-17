@@ -29,13 +29,43 @@ function responseBodyForLog(error) {
 }
 
 function logApiError(endpoint, error) {
-  console.error('API error:', {
-    endpoint,
+  // Build a plain object with enumerable properties so consoles and remote
+  // logging systems receive meaningful diagnostics even when Axios stores
+  // data on non-enumerable properties.
+  const serialized = {
+    message: error?.message || null,
+    code: error?.code || null,
     status: error?.response?.status ?? null,
     statusText: error?.response?.statusText ?? null,
-    data: responseBodyForLog(error),
-    message: error?.message || 'Unknown request error',
-  });
+    data: null,
+    method: error?.config?.method ?? null,
+    url: error?.config?.url ?? null,
+    headers: null,
+  };
+
+  try {
+    serialized.data = responseBodyForLog(error);
+  } catch (e) {
+    serialized.data = 'Unable to read response body';
+  }
+
+  try {
+    const rawHeaders = error?.config?.headers || error?.response?.config?.headers;
+    if (rawHeaders && typeof rawHeaders === 'object') {
+      const safeHeaders = {};
+      Object.entries(rawHeaders).forEach(([name, value]) => {
+        const lower = String(name).toLowerCase();
+        safeHeaders[name] = ['authorization', 'cookie', 'proxy-authorization', 'x-api-key'].includes(lower)
+          ? '[REDACTED]'
+          : value;
+      });
+      serialized.headers = safeHeaders;
+    }
+  } catch (e) {
+    serialized.headers = null;
+  }
+
+  console.error('API error:', { endpoint, ...serialized });
 }
 
 function invalidResumeIdError(resumeId) {
