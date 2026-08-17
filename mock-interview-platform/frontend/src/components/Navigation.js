@@ -175,7 +175,7 @@ export default function Navigation() {
         </div>
 
         {isMenuOpen && (
-          <div className={darkMode ? 'border-t border-white/10 md:hidden' : 'border-t border-gray-200 md:hidden'}>
+          <div className={isDarkTheme ? 'border-t border-white/10 md:hidden' : 'border-t border-gray-200 md:hidden'}>
             <div className="space-y-1 px-2 py-3">
               {navigationLinks.map((link) => (
                 <Link
