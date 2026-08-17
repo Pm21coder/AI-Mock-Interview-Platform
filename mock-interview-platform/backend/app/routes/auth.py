@@ -8,9 +8,10 @@ import bcrypt
 import jwt
 from flask import Blueprint, jsonify, request, current_app
 
-from app import mongo
+from app import mongo, limiter
 from app.config import Config
 from app.utils.time import utc_now
+from app.utils.validation import validate_string, validate_email
 
 auth_bp = Blueprint('auth', __name__)
 DEMO_EMAIL = 'demo@mockinterview.app'
@@ -156,18 +157,33 @@ def create_token(user):
 
 
 @auth_bp.route('/register', methods=['POST'])
+@limiter.limit("5 per minute")  # Prevent spam and brute force attacks
 def register():
     global local_auth_users
     data = request.get_json(silent=True) or {}
     email = (data.get('email') or '').strip().lower()
     password = data.get('password') or ''
 
-    if not email or '@' not in email or not password:
-        return jsonify({'error': 'A valid email and password are required'}), 400
+    # Validate email
+    is_valid, error = validate_email(email)
+    if not is_valid:
+        return jsonify({'error': error}), 400
+    
+    # Validate password exists
+    if not password:
+        return jsonify({'error': 'Password is required'}), 400
+    
+    # Validate password length
+    is_valid, error = validate_string(password, min_length=8, max_length=128, field_name="Password")
+    if not is_valid:
+        return jsonify({'error': error}), 400
+    
+    # Validate password strength
     if not validate_password(password):
         return jsonify({
             'error': 'Password must be at least 8 characters and include uppercase, lowercase, a number, and a symbol.'
         }), 400
+    
     if find_user(email):
         return jsonify({'error': 'User already exists'}), 409
 
@@ -214,10 +230,26 @@ def register():
 
 
 @auth_bp.route('/login', methods=['POST'])
+@limiter.limit("5 per minute")  # Protect against brute force attacks
 def login():
     data = request.get_json(silent=True) or {}
     email = (data.get('email') or '').strip().lower()
     password = data.get('password') or ''
+    
+    # Validate email format
+    is_valid, error = validate_email(email)
+    if not is_valid:
+        return jsonify({'error': 'Invalid email address'}), 400
+    
+    # Validate password exists
+    if not password:
+        return jsonify({'error': 'Password is required'}), 400
+    
+    # Validate password length
+    is_valid, error = validate_string(password, min_length=1, max_length=128, field_name="Password")
+    if not is_valid:
+        return jsonify({'error': error}), 400
+    
     user = find_user(email)
 
     if not user or not bcrypt.checkpw(password.encode('utf-8'), user['password_hash'].encode('utf-8')):

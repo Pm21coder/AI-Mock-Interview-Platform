@@ -4,7 +4,7 @@ import logging
 
 from flask import Blueprint, jsonify, request
 
-from app import mongo
+from app import mongo, limiter
 from app.config import Config
 from app.models.interview import InterviewQuestion, InterviewSession
 from app.services.dashboard_service import DashboardService
@@ -14,6 +14,7 @@ from app.services.subscription_service import SubscriptionService
 from app.socket_events import emit_dashboard_update, emit_interview_usage_update
 from app.utils.auth import token_required
 from app.utils.time import utc_now
+from app.utils.validation import validate_string, validate_integer
 from app.cache_utils import optimize_response
 
 logger = logging.getLogger(__name__)
@@ -40,14 +41,17 @@ def current_subscription_user_id():
 
 @interview_bp.route('/generate-questions', methods=['POST'])
 @token_required
+@limiter.limit("10 per minute")  # Prevent abuse of expensive AI API calls
 def generate_questions():
     data = request.get_json(silent=True) or {}
     job_role = (data.get('job_role') or '').strip()
     category = (data.get('category') or 'technical').strip().lower()
     difficulty = (data.get('difficulty') or 'medium').strip().lower()
 
-    if not job_role:
-        return jsonify({'error': 'Job role is required'}), 400
+    # Validate job_role length to prevent DoS
+    is_valid, error = validate_string(job_role, min_length=1, max_length=100, field_name="Job role")
+    if not is_valid:
+        return jsonify({'error': error}), 400
 
     valid_categories = {'technical', 'behavioral', 'situational', 'system_design'}
     if category not in valid_categories:
@@ -59,12 +63,11 @@ def generate_questions():
     if difficulty not in {'easy', 'medium', 'hard'}:
         return jsonify({'error': 'Difficulty must be easy, medium, or hard'}), 400
 
-    try:
-        num_questions = int(data.get('num_questions', 5))
-    except (TypeError, ValueError):
-        return jsonify({'error': 'num_questions must be a number'}), 400
-    if not 1 <= num_questions <= 10:
-        return jsonify({'error': 'num_questions must be between 1 and 10'}), 400
+    # Validate num_questions
+    is_valid, error = validate_integer(data.get('num_questions', 5), min_value=1, max_value=10, field_name="num_questions")
+    if not is_valid:
+        return jsonify({'error': error}), 400
+    num_questions = int(data.get('num_questions', 5))
 
     user_id = current_user_id()
     subscription_user_id = current_subscription_user_id()
@@ -145,6 +148,7 @@ def generate_questions():
 
 @interview_bp.route('/analyze-answer', methods=['POST'])
 @token_required
+@limiter.limit("20 per minute")  # Prevent spam of analysis requests
 def analyze_answer():
     user_id = current_user_id()
     subscription_user_id = current_subscription_user_id()
@@ -157,6 +161,11 @@ def analyze_answer():
 
     if not question or not answer:
         return jsonify({'error': 'Question and answer are required'}), 400
+    
+    # Validate answer length to prevent DoS
+    is_valid, error = validate_string(answer, min_length=1, max_length=5000, field_name="Answer")
+    if not is_valid:
+        return jsonify({'error': error}), 400
 
     try:
         # Check if user has video analysis feature

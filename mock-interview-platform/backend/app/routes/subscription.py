@@ -6,15 +6,17 @@ import razorpay
 from flask import Blueprint, current_app, jsonify, request
 from razorpay.errors import BadRequestError, GatewayError, ServerError
 
-from app import mongo
+from app import mongo, limiter
 from app.config import Config
 from app.services.subscription_service import SubscriptionService, fallback_subscriptions
+from app.services.audit_logger import get_audit_logger
 from app.utils.auth import token_required
 from app.utils.time import utc_now
 from app.cache_utils import cache_response, optimize_response
 
 subscription_bp = Blueprint('subscription', __name__)
 subscription_service = SubscriptionService()
+audit_logger = get_audit_logger()
 
 fallback_razorpay_orders = {}
 
@@ -122,6 +124,7 @@ def get_subscription_status():
 
 @subscription_bp.route('/create-order', methods=['POST'])
 @token_required
+@limiter.limit("10 per minute")  # Protect payment endpoints from abuse
 def create_razorpay_order():
     """Create a Razorpay order for a subscription tier.
 
@@ -208,6 +211,11 @@ def create_razorpay_order():
         # Local/demo mode can still verify the payment against the in-memory
         # order above. A production deployment should keep MongoDB available.
         pass
+    
+    # Log payment initiation
+    audit_logger.log_payment_initiated(
+        current_user['_id'], tier, order['amount'], order['currency'], order['id']
+    )
 
     return jsonify({
         'order_id': order['id'],
@@ -302,9 +310,23 @@ def verify_razorpay_payment():
                 )
             except Exception:
                 pass
+            
+            # Log successful payment
+            amount = order_record.get('amount', 0)
+            audit_logger.log_payment_completed(
+                current_user['_id'], tier, amount, razorpay_order_id, 
+                razorpay_payment_id, 'success'
+            )
         else:
             _store_fallback_subscription(
                 current_user['_id'], tier, razorpay_order_id, razorpay_payment_id
+            )
+            
+            # Log successful payment in fallback mode
+            amount = order_record.get('amount', 0)
+            audit_logger.log_payment_completed(
+                current_user['_id'], tier, amount, razorpay_order_id,
+                razorpay_payment_id, 'success'
             )
 
         if razorpay_order_id in fallback_razorpay_orders:

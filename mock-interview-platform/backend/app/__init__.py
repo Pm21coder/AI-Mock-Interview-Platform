@@ -6,12 +6,18 @@ from flask_cors import CORS
 from flask_pymongo import PyMongo
 from flask_socketio import SocketIO
 from flask_compress import Compress
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
 
 from app.config import Config
 
 mongo = PyMongo()
-socketio = SocketIO(cors_allowed_origins='*')
+socketio = SocketIO()
 compress = Compress()
+limiter = Limiter(
+    key_func=get_remote_address,
+    default_limits=["200 per day", "50 per hour"]
+)
 
 
 def _fallback_local_mongo_uri():
@@ -72,7 +78,21 @@ def create_app(config_class=Config):
     # Security check: ensure secret keys are not public defaults in production
     _check_secret_keys(app)
 
-    CORS(app)
+    # Configure CORS with restricted origins for security
+    cors_origins = app.config.get('CORS_ORIGINS', ['http://localhost:3000'])
+    CORS(app, origins=cors_origins, supports_credentials=True)
+    
+    # Initialize rate limiter
+    limiter.init_app(app)
+    
+    # Enforce HTTPS in production
+    if not app.debug and os.getenv('FLASK_ENV', '').lower() == 'production':
+        @app.before_request
+        def enforce_https():
+            from flask import redirect, request
+            if request.scheme != 'https':
+                url = request.url.replace('http://', 'https://', 1)
+                return redirect(url, code=301)
     # A remote MongoDB SRV record can be temporarily unavailable during local
     # development (for example when DNS is offline). The interview endpoints
     # support guest sessions in memory, so do not let that optional dependency
@@ -111,7 +131,9 @@ def create_app(config_class=Config):
             )
         else:
             app.logger.warning('⚠ MongoDB unavailable; starting in guest mode.')
-    socketio.init_app(app)
+    
+    # Initialize socketio with restricted CORS origins for security
+    socketio.init_app(app, cors_allowed_origins=cors_origins)
     compress.init_app(app)  # Enable gzip compression for all responses
 
     from app.routes.interview import interview_bp
@@ -146,5 +168,24 @@ def create_app(config_class=Config):
         except Exception:
             active = 'error'
         return {'status': 'ok', 'active_client': active}, 200
+    
+    # Register error handlers for security
+    from app.utils.errors import AppError, handle_app_error, handle_generic_error
+    
+    @app.errorhandler(AppError)
+    def handle_app_error_handler(error):
+        return handle_app_error(error)
+    
+    @app.errorhandler(400)
+    def handle_bad_request(error):
+        return {'error': 'Bad request'}, 400
+    
+    @app.errorhandler(404)
+    def handle_not_found(error):
+        return {'error': 'Resource not found'}, 404
+    
+    @app.errorhandler(500)
+    def handle_internal_error(error):
+        return handle_generic_error(error)
 
     return app

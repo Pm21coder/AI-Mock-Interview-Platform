@@ -78,6 +78,15 @@ class Config:
     RAZORPAY_KEY_SECRET = os.getenv('RAZORPAY_KEY_SECRET', '')
     RAZORPAY_CURRENCY = os.getenv('RAZORPAY_CURRENCY', 'INR')
 
+    # CORS Configuration
+    # Restrict to specific origins for security. Prevents unauthorized cross-origin requests.
+    CORS_ORIGINS = os.getenv('CORS_ORIGINS', 'http://localhost:3000').split(',')
+    
+    # Rate Limiting Configuration
+    # Protect against brute force and DoS attacks
+    RATELIMIT_STORAGE_URL = os.getenv('RATELIMIT_STORAGE_URL', 'memory://')
+    RATELIMIT_STRATEGY = os.getenv('RATELIMIT_STRATEGY', 'fixed-window')
+
     # Frontend URL
     FRONTEND_URL = os.getenv('FRONTEND_URL', 'http://localhost:3000')
 
