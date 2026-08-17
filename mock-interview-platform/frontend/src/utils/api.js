@@ -18,6 +18,8 @@ const REQUEST_TIMEOUTS = {
   // Reduce question generation timeout to keep the UI responsive when the AI
   // provider is slow. 15s is a reasonable compromise between quality and UX.
   interviewQuestions: 15_000,
+  // Client-side timeout for answer analysis. Keep slightly shorter than server limits
+  interviewAnalysis: 25_000,
 };
 
 function responseBodyForLog(error) {
@@ -243,9 +245,20 @@ export const getQuestions = async (params) => {
 
 export const submitAnswer = async (data) => {
   try {
-    const response = await api.post('/api/interview/analyze-answer', data);
+    const response = await api.post('/api/interview/analyze-answer', data, {
+      timeout: REQUEST_TIMEOUTS.interviewAnalysis,
+    });
     return response.data;
   } catch (error) {
+    // Distinguish timeout errors and return a friendlier message
+    if (error?.code === 'ECONNABORTED' || error?.message?.toLowerCase?.().includes('timeout')) {
+      console.error('submitAnswer API timeout:', error?.message || error);
+      return {
+        error: 'Analysis timed out',
+        details: 'The analysis service is taking too long. Try again or reduce response length.',
+      };
+    }
+
     let errorPayload = error.response?.data;
 
     console.error('submitAnswer API error:', error);
