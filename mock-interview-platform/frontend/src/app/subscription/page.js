@@ -398,14 +398,9 @@ export default function SubscriptionPage() {
               <div className="mb-6">
                 <h3 className="mb-2 text-2xl font-bold text-gray-900">{plan.name}</h3>
                 <div className="flex items-baseline gap-2">
-                  <span className="text-4xl font-bold text-gray-900">${plan.price}</span>
+                  <span className="text-4xl font-bold text-gray-900">{plan.priceInr}</span>
                   <span className="text-lg text-gray-600">/ {plan.interval}</span>
                 </div>
-                {plan.price > 0 && (
-                  <p className="mt-1 text-sm font-medium text-gray-500">
-                    {plan.priceInr} INR
-                  </p>
-                )}
                 <p className="mt-2 text-sm text-gray-600">
                   {plan.interviews === 'Unlimited' 
                     ? 'Unlimited interviews' 
