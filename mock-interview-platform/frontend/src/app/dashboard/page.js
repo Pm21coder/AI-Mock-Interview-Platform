@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useSyncExternalStore } from 'react';
 import Navigation from '../../components/Navigation';
 import { getDashboardStats } from '../../utils/api';
 import { useDisplayName } from '../../hooks/useAuth';
+import { useInterviewSync } from '../../hooks/useInterviewSync';
 import { onSocketEvent, emitSocketEvent } from '../../utils/socket';
 
 export default function DashboardPage() {
@@ -69,6 +70,13 @@ export default function DashboardPage() {
 
     return undefined;
   }, [fetchDashboardData, isFallbackData, retrying]);
+
+  // Listen for interview completion events and refresh data
+  useInterviewSync(() => {
+    console.log('Interview completed, refreshing dashboard data...');
+    // Refresh dashboard data immediately when interview completes
+    fetchDashboardData();
+  });
 
   useEffect(() => {
     const needsFreshFetch = typeof window !== 'undefined' && window.sessionStorage.getItem('dashboard_refresh') === 'true';

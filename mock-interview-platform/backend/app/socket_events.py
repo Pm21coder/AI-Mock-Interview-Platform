@@ -1,4 +1,4 @@
-"""Socket.IO event handlers for real-time dashboard updates.
+"""Socket.IO event handlers for real-time interview and dashboard updates.
 
 When an interview completes, the backend emits a `dashboard_update` event
 to the user's personal room. The dashboard page subscribes to this event
@@ -72,3 +72,27 @@ def emit_dashboard_update(user_id, stats):
         {'stats': stats},
         room=user_room(user_id),
     )
+
+
+def emit_interview_usage_update(user_id, subscription, session_id):
+    """Notify a user's open pages that interview usage has changed.
+
+    Usage is consumed when a question set is successfully created, whereas
+    dashboard performance data is updated when the interview is completed.
+    Keeping these as separate events lets subscription views refresh as soon
+    as the quota changes without incorrectly treating an unfinished session as
+    completed.
+    """
+    try:
+        socketio.emit(
+            'interview_usage_updated',
+            {
+                'session_id': session_id,
+                'subscription': subscription,
+            },
+            room=user_room(user_id),
+        )
+    except Exception as exc:
+        # A websocket outage must never prevent a successfully-created
+        # interview from being returned to the user.
+        print(f'Interview usage update emit error: {exc}')

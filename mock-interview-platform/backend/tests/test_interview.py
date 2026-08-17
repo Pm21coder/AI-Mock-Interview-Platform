@@ -24,6 +24,16 @@ class InterviewQuestionRouteTests(TestCase):
         ) as get_categories, patch(
             'app.routes.interview.subscription_service.increment_interview_count',
         ) as increment_count, patch(
+            'app.routes.interview.subscription_service.get_user_subscription',
+            return_value={
+                'tier': 'free',
+                'interviews_used_this_month': 1,
+                'interviews_remaining': 2,
+                'monthly_limit': 3,
+            },
+        ), patch(
+            'app.routes.interview.emit_interview_usage_update',
+        ) as emit_usage_update, patch(
             'app.routes.interview.gemini_service.generate_questions',
             return_value=[{
                 'question': 'How do you design a reliable API?',
@@ -47,6 +57,16 @@ class InterviewQuestionRouteTests(TestCase):
         check_limit.assert_called_once_with(self.user_id)
         get_categories.assert_called_once_with(self.user_id)
         increment_count.assert_called_once_with(self.user_id)
+        emit_usage_update.assert_called_once_with(
+            str(self.user_id),
+            {
+                'tier': 'free',
+                'interviews_used_this_month': 1,
+                'interviews_remaining': 2,
+                'monthly_limit': 3,
+            },
+            response.get_json()['session_id'],
+        )
 
     def test_restricted_category_returns_a_structured_upgrade_response(self):
         with patch(

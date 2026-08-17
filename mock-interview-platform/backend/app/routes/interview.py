@@ -11,7 +11,7 @@ from app.services.dashboard_service import DashboardService
 from app.services.gemini_service import GeminiService
 from app.services.nlp_service import NLPService
 from app.services.subscription_service import SubscriptionService
-from app.socket_events import emit_dashboard_update
+from app.socket_events import emit_dashboard_update, emit_interview_usage_update
 from app.utils.auth import token_required
 from app.utils.time import utc_now
 from app.cache_utils import optimize_response
@@ -106,7 +106,7 @@ def generate_questions():
         if not questions:
             return jsonify({'error': 'No questions could be generated'}), 500
 
-        # Increment interview count using the new subscription service
+        # A generated question set consumes one interview from the plan.
         subscription_service.increment_interview_count(subscription_user_id)
 
         session_id = str(uuid4())
@@ -127,7 +127,18 @@ def generate_questions():
             except Exception:
                 pass
 
-        return jsonify({'session_id': session_id, 'questions': session_document['questions']})
+        # Notify any open subscription/setup pages after the usage write has
+        # completed. The dashboard receives its separate completion event only
+        # after feedback is generated.
+        subscription = subscription_service.get_user_subscription(subscription_user_id)
+        if user_id != 'guest':
+            emit_interview_usage_update(user_id, subscription, session_id)
+
+        return jsonify({
+            'session_id': session_id,
+            'questions': session_document['questions'],
+            'subscription': subscription,
+        })
     except Exception as exc:
         return jsonify({'error': str(exc)}), 500
 

@@ -6,6 +6,7 @@ import Navigation from '../../../components/Navigation';
 import toast from 'react-hot-toast';
 import { getQuestionCategories } from '../../../utils/api';
 import { useSubscription } from '../../../hooks/useSubscription';
+import { useInterviewSync } from '../../../hooks/useInterviewSync';
 
 export default function InterviewSetup() {
   const router = useRouter();
@@ -23,6 +24,10 @@ export default function InterviewSetup() {
     difficulty: 'medium',
     num_questions: 5,
   });
+
+  // Refresh quota and available categories when another tab starts an
+  // interview for this account.
+  useInterviewSync(refetch);
 
   useEffect(() => {
     const fetchCategories = async () => {

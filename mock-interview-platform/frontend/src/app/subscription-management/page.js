@@ -1,11 +1,12 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import Navigation from '../../components/Navigation';
 import AdvancedAnalyticsDashboard from '../../components/AdvancedAnalyticsDashboard';
 import EmailSupportWidget from '../../components/EmailSupportWidget';
 import { useSubscription } from '../../hooks/useSubscription';
+import { useInterviewSync } from '../../hooks/useInterviewSync';
 import {
   getUsageStats,
   getBillingHistory,
@@ -28,49 +29,60 @@ export default function SubscriptionManagementPage() {
   const [cancelLoading, setCancelLoading] = useState(false);
   const [showCancelConfirm, setShowCancelConfirm] = useState(false);
 
-  useEffect(() => {
-    const fetchData = async () => {
-      try {
-        setLoading(true);
-        setError(null);
+  const fetchData = useCallback(async () => {
+    try {
+      setLoading(true);
+      setError(null);
 
-        const [statsData, historyData, featuresData, categoriesData, historyLimitData] = await Promise.all([
-          getUsageStats(),
-          getBillingHistory(),
-          getAvailableFeatures(),
-          getQuestionCategories().catch(() => null),
-          getFeedbackHistoryLimit().catch(() => null),
-        ]);
+      const [statsData, historyData, featuresData, categoriesData, historyLimitData] = await Promise.all([
+        getUsageStats(),
+        getBillingHistory(),
+        getAvailableFeatures(),
+        getQuestionCategories().catch(() => null),
+        getFeedbackHistoryLimit().catch(() => null),
+      ]);
 
-        if (statsData && !statsData.error) {
-          setUsageStats(statsData);
-        }
-
-        if (historyData && historyData.billing_history) {
-          setBillingHistory(historyData.billing_history);
-        }
-
-        if (featuresData && featuresData.features) {
-          setFeatures(featuresData.features);
-        }
-
-        if (categoriesData) {
-          setQuestionCategories(categoriesData);
-        }
-
-        if (historyLimitData) {
-          setFeedbackHistoryLimit(historyLimitData);
-        }
-      } catch (err) {
-        setError('Failed to load subscription data');
-        console.error(err);
-      } finally {
-        setLoading(false);
+      if (statsData && !statsData.error) {
+        setUsageStats(statsData);
       }
-    };
 
-    fetchData();
-  }, [subscription]); // Refetch other data when subscription changes
+      if (historyData && historyData.billing_history) {
+        setBillingHistory(historyData.billing_history);
+      }
+
+      if (featuresData && featuresData.features) {
+        setFeatures(featuresData.features);
+      }
+
+      if (categoriesData) {
+        setQuestionCategories(categoriesData);
+      }
+
+      if (historyLimitData) {
+        setFeedbackHistoryLimit(historyLimitData);
+      }
+    } catch (err) {
+      setError('Failed to load subscription data');
+      console.error(err);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    const initialFetch = window.setTimeout(() => {
+      void fetchData();
+    }, 0);
+
+    return () => window.clearTimeout(initialFetch);
+  }, [fetchData, subscription]); // Refetch other data when subscription changes
+
+  const refreshUsage = useCallback(() => {
+    void refetchSubscription();
+    void fetchData();
+  }, [fetchData, refetchSubscription]);
+
+  useInterviewSync(refreshUsage);
 
   const handleCancelSubscription = async () => {
     try {

@@ -1,8 +1,9 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { Suspense, useState, useEffect, useCallback } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Navigation from '../../components/Navigation';
+import { useInterviewSync, useSubscriptionSync } from '../../hooks/useInterviewSync';
 import {
   createRazorpayOrder,
   getSubscriptionStatus,
@@ -96,6 +97,25 @@ const fetchSubscriptionStatus = async (setSubscription, setLoading, setError) =>
 };
 
 export default function SubscriptionPage() {
+  return (
+    <Suspense fallback={<SubscriptionLoading />}>
+      <SubscriptionPageContent />
+    </Suspense>
+  );
+}
+
+function SubscriptionLoading() {
+  return (
+    <div className="min-h-screen bg-gray-50">
+      <Navigation />
+      <main className="container mx-auto px-4 py-16 text-center text-gray-600">
+        Loading subscription details...
+      </main>
+    </div>
+  );
+}
+
+function SubscriptionPageContent() {
   const router = useRouter();
   const params = useSearchParams();
   const [subscription, setSubscription] = useState(null);
@@ -105,14 +125,35 @@ export default function SubscriptionPage() {
   const [processing, setProcessing] = useState(false);
   const [processingTier, setProcessingTier] = useState(null);
 
-  useEffect(() => {
+  const refreshSubscription = useCallback(() => {
     fetchSubscriptionStatus(setSubscription, setLoading, setError);
+  }, []);
+
+  useEffect(() => {
+    refreshSubscription();
     // Check for upgrade prompt in URL
     const prompt = params.get('upgrade_prompt');
     if (prompt === 'limit_reached') {
-      setUpgradePrompt('limit_reached');
+      const promptTimer = window.setTimeout(() => {
+        setUpgradePrompt('limit_reached');
+      }, 0);
+      return () => window.clearTimeout(promptTimer);
     }
-  }, [params]);
+
+    return undefined;
+  }, [params, refreshSubscription]);
+
+  // Refresh usage as soon as another page starts an interview.
+  useInterviewSync(() => {
+    console.log('Interview usage changed, refreshing subscription data...');
+    refreshSubscription();
+  });
+
+  // Listen for subscription updates from other pages/tabs
+  useSubscriptionSync(() => {
+    console.log('Subscription updated, refreshing...');
+    refreshSubscription();
+  });
 
   const handleRazorpayCheckout = async (tier) => {
     if (!hasAuthToken()) {
@@ -365,7 +406,7 @@ export default function SubscriptionPage() {
               <div className="flex-1">
                 <h3 className="text-lg font-semibold text-orange-900">Monthly Interview Limit Reached</h3>
                 <p className="mt-2 text-sm text-orange-700">
-                  You've used all your monthly interviews on the Free plan. Upgrade your plan to continue practicing and unlock premium features like video analysis and all question categories.
+                  You&apos;ve used all your monthly interviews on the Free plan. Upgrade your plan to continue practicing and unlock premium features like video analysis and all question categories.
                 </p>
                 <button
                   onClick={() => setUpgradePrompt(null)}
@@ -379,7 +420,7 @@ export default function SubscriptionPage() {
         )}
 
         {/* Current Subscription Status */}
-        {subscription && subscription.tier !== 'free' && (
+        {subscription && (
           <div className="mb-8 rounded-lg bg-blue-50 p-6">
             <div className="flex items-center justify-between">
               <div>
