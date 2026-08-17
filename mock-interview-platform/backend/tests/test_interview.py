@@ -1,5 +1,6 @@
 from unittest import TestCase
 from unittest.mock import patch
+from datetime import timedelta
 
 from bson import ObjectId
 from flask import Flask, request
@@ -7,6 +8,7 @@ from flask import Flask, request
 from app.routes.interview import generate_questions
 from app.services.gemini_service import GeminiService
 from app.services.subscription_service import SubscriptionService, fallback_subscriptions
+from app.utils.time import utc_now
 
 
 class InterviewQuestionRouteTests(TestCase):
@@ -151,6 +153,36 @@ class SubscriptionFallbackTests(TestCase):
         self.assertFalse(can_proceed_after_limit)
         self.assertEqual(limit_error['code'], 'interview_limit_reached')
         self.assertEqual(limit_error['required_tier'], 'pro')
+
+    def test_local_auth_account_persists_and_recovers_interview_usage(self):
+        user_id = 'demo_local_usage'
+        users = {
+            'local@example.com': {
+                '_id': user_id,
+                'email': 'local@example.com',
+                'subscription_tier': 'free',
+                'subscription_status': 'active',
+                'subscription_start_date': utc_now() - timedelta(days=1),
+                'subscription_end_date': utc_now() + timedelta(days=29),
+                'interviews_used_this_month': 0,
+            }
+        }
+        subscription_service = SubscriptionService()
+
+        with patch('app.services.subscription_service.mongo') as mock_mongo, \
+             patch('app.routes.auth.load_local_auth_users', return_value=users), \
+             patch('app.routes.auth.save_local_auth_users') as save_local_users:
+            mock_mongo.db.users.find_one.return_value = None
+            mock_mongo.db.interviews.count_documents.return_value = 2
+
+            subscription = subscription_service.get_user_subscription(user_id)
+            new_count = subscription_service.increment_interview_count(user_id)
+
+        self.assertEqual(subscription['interviews_used_this_month'], 2)
+        self.assertEqual(subscription['interviews_remaining'], 1)
+        self.assertEqual(new_count, 3)
+        self.assertEqual(users['local@example.com']['interviews_used_this_month'], 3)
+        save_local_users.assert_called()
 
 
 class GeminiFallbackTests(TestCase):

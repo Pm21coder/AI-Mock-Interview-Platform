@@ -68,6 +68,18 @@ class SubscriptionService:
             fallback_subscription = fallback_subscriptions.get(str(user_id))
             if fallback_subscription:
                 return self._get_fallback_subscription(fallback_subscription)
+
+            # Local development accounts use demo_* ids and are stored in the
+            # JSON auth store, even when MongoDB is online for interview data.
+            # Read their persisted usage instead of returning a new Free-plan
+            # object on every request.
+            local_user = self._find_local_user(user_id)
+            if local_user:
+                email, user_record, users = local_user
+                return self._get_local_user_subscription(
+                    user_id, email, user_record, users,
+                )
+
             return self._free_tier_subscription()
 
         tier = user.get('subscription_tier', 'free')
@@ -304,6 +316,27 @@ class SubscriptionService:
             )
             return fallback_subscription['interviews_used_this_month']
 
+        local_user = self._find_local_user(user_id)
+        if local_user:
+            email, user_record, users = local_user
+            # First recover any sessions created before local-account usage was
+            # persisted, then atomically advance the local counter.
+            self._get_local_user_subscription(user_id, email, user_record, users)
+            try:
+                interviews_used = int(user_record.get('interviews_used_this_month', 0))
+            except (TypeError, ValueError):
+                interviews_used = 0
+
+            new_count = interviews_used + 1
+            user_record['interviews_used_this_month'] = new_count
+            self._save_local_user(email, user_record, users)
+
+            sub = self._get_local_user_subscription(user_id, email, user_record, users)
+            remaining = sub['interviews_remaining']
+            if isinstance(remaining, int) and remaining <= 2:
+                self._send_usage_warning(user_id, sub)
+            return new_count
+
         try:
             result = mongo.db.users.update_one(
                 {'_id': user_id},
@@ -325,6 +358,116 @@ class SubscriptionService:
             logger.error(f'Error incrementing interview count for user {user_id}: {e}')
 
         return 1
+
+    def _find_local_user(self, user_id):
+        """Return the persisted local auth record for a demo account, if any."""
+        if not str(user_id).startswith('demo_'):
+            return None
+
+        try:
+            # Import lazily to avoid a route/service import cycle at startup.
+            from app.routes.auth import load_local_auth_users
+
+            users = load_local_auth_users()
+            for email, user in users.items():
+                if str(user.get('_id')) == str(user_id):
+                    return email, user, users
+        except Exception as exc:
+            logger.warning('Unable to load local subscription user %s: %s', user_id, exc)
+
+        return None
+
+    def _save_local_user(self, email, user_record, users):
+        """Persist a changed local auth record without affecting other users."""
+        try:
+            from app.routes.auth import save_local_auth_users
+
+            users[email] = user_record
+            save_local_auth_users(users)
+        except Exception as exc:
+            logger.warning('Unable to save local subscription user %s: %s', email, exc)
+
+    @staticmethod
+    def _as_datetime(value):
+        """Normalize datetimes loaded from the JSON local-auth store."""
+        if isinstance(value, datetime):
+            return value
+        if not isinstance(value, str):
+            return None
+
+        try:
+            parsed = datetime.fromisoformat(value.replace('Z', '+00:00'))
+            return parsed.replace(tzinfo=None) if parsed.tzinfo else parsed
+        except ValueError:
+            return None
+
+    def _count_local_interviews_since(self, user_id, start_date):
+        """Recover sessions recorded before demo-account usage was persisted."""
+        query = {'user_id': str(user_id)}
+        if start_date:
+            query['created_at'] = {'$gte': start_date}
+
+        try:
+            return mongo.db.interviews.count_documents(query)
+        except Exception:
+            return 0
+
+    def _get_local_user_subscription(self, user_id, email, user_record, users):
+        """Build and persist subscription state for JSON-backed demo accounts."""
+        now = utc_now()
+        tier = user_record.get('subscription_tier', 'free')
+        status = user_record.get('subscription_status', 'active')
+        start_date = self._as_datetime(user_record.get('subscription_start_date'))
+        end_date = self._as_datetime(user_record.get('subscription_end_date'))
+        changed = False
+
+        # Local accounts use the same 30-day billing cycle as database users.
+        if not start_date or not end_date or now > end_date:
+            start_date = now
+            end_date = now + timedelta(days=30)
+            user_record['subscription_start_date'] = start_date
+            user_record['subscription_end_date'] = end_date
+            user_record['interviews_used_this_month'] = 0
+            changed = True
+
+        try:
+            interviews_used = int(user_record.get('interviews_used_this_month', 0))
+        except (TypeError, ValueError):
+            interviews_used = 0
+
+        # Previous versions stored demo sessions in MongoDB but failed to
+        # update the local auth record. Keep the larger value so this repair
+        # never gives a user extra quota after a server restart.
+        recovered_count = self._count_local_interviews_since(user_id, start_date)
+        if recovered_count > interviews_used:
+            interviews_used = recovered_count
+            user_record['interviews_used_this_month'] = interviews_used
+            changed = True
+
+        if changed:
+            self._save_local_user(email, user_record, users)
+
+        plan_info = self.config_tiers.get(tier, self.config_tiers['free'])
+        monthly_limit = plan_info['monthly_interviews']
+        interviews_remaining = (
+            max(0, monthly_limit - interviews_used)
+            if monthly_limit is not None
+            else 'unlimited'
+        )
+
+        return {
+            'tier': tier,
+            'status': status,
+            'interviews_used_this_month': interviews_used,
+            'interviews_remaining': interviews_remaining,
+            'monthly_limit': monthly_limit if monthly_limit is not None else 'unlimited',
+            'features': plan_info['features'],
+            'subscription_start_date': start_date,
+            'subscription_end_date': end_date,
+            'plan_info': plan_info,
+            'is_trial': user_record.get('is_trial', False),
+            'trial_days_remaining': 0,
+        }
 
     def get_usage_stats(self, user_id):
         """
