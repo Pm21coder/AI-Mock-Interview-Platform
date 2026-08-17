@@ -311,11 +311,26 @@ export const saveResponse = async (data) => {
   return response.data;
 };
 
-export const getDashboardStats = async () => {
-  const timestamp = new Date().getTime(); // Cache-busting to ensure fresh data
+// In-memory cache for dashboard stats to avoid rapid-fire requests (429)
+let _cachedDashboardStats = null;
+let _cachedDashboardTs = 0;
+const DASHBOARD_CACHE_TTL = 30_000; // 30 seconds
 
+export const getDashboardStats = async (options = { forceRefresh: false }) => {
   try {
-    const response = await api.get(`/api/interview/dashboard-stats?t=${timestamp}`);
+    const now = Date.now();
+    if (!options?.forceRefresh && _cachedDashboardStats && (now - _cachedDashboardTs) < DASHBOARD_CACHE_TTL) {
+      // Return cached payload to avoid hammering the backend (helps avoid 429)
+      return _cachedDashboardStats;
+    }
+
+    // Fetch fresh data from the backend (no automatic timestamp param)
+    const response = await api.get('/api/interview/dashboard-stats', {
+      timeout: REQUEST_TIMEOUTS.questionCategories,
+    });
+
+    _cachedDashboardStats = response.data;
+    _cachedDashboardTs = Date.now();
     return response.data;
   } catch (error) {
     // The backend may be temporarily offline during local startup or if the
