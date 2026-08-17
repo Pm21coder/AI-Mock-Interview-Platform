@@ -80,7 +80,8 @@ class Config:
 
     # CORS Configuration
     # Restrict to specific origins for security. Prevents unauthorized cross-origin requests.
-    CORS_ORIGINS = os.getenv('CORS_ORIGINS', 'http://localhost:3000').split(',')
+    # Strip whitespace from origins to avoid matching issues
+    CORS_ORIGINS = [origin.strip() for origin in os.getenv('CORS_ORIGINS', 'http://localhost:3000').split(',')]
     
     # Rate Limiting Configuration
     # Protect against brute force and DoS attacks
