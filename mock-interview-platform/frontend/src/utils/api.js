@@ -15,7 +15,9 @@ const REQUEST_TIMEOUTS = {
   subscriptionStatus: 8_000,
   questionCategories: 8_000,
   createOrder: 15_000,
-  interviewQuestions: 45_000,
+  // Reduce question generation timeout to keep the UI responsive when the AI
+  // provider is slow. 15s is a reasonable compromise between quality and UX.
+  interviewQuestions: 15_000,
 };
 
 function responseBodyForLog(error) {
@@ -225,9 +227,11 @@ export const getQuestions = async (params) => {
         },
       ];
 
+      const requested = Number(params?.num_questions) || 3;
+      const count = Math.min(Math.max(1, requested), 10); // clamp between 1 and 10
       return {
         session_id: `local_fallback_${Date.now()}`,
-        questions: fallbackQuestions.slice(0, params?.num_questions || 3),
+        questions: fallbackQuestions.slice(0, count),
         fallback: true,
       };
     }

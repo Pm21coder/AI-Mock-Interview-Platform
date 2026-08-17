@@ -350,7 +350,9 @@ function InterviewSessionContent() {
       const jobRole = params.get('job_role') || 'Software Engineer';
       const category = params.get('category') || 'technical';
       const difficulty = params.get('difficulty') || 'medium';
-      const numQuestions = Number(params.get('num_questions') || 5);
+      // Sanitize and clamp requested number of questions to backend limits (1-10)
+      const rawNum = Number(params.get('num_questions') || 5);
+      const numQuestions = Number.isFinite(rawNum) ? Math.min(Math.max(1, Math.floor(rawNum)), 10) : 5;
 
       setLoadError('');
       setCanUpgradeForLoadError(false);
