@@ -363,5 +363,10 @@ def get_dashboard_stats():
         return response
 
     except Exception as exc:
-        print(f"Dashboard stats error: {str(exc)}")
-        return jsonify({'error': 'Unable to load dashboard data'}), 500
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error(f"Dashboard stats error for user {user_id}: {str(exc)}", exc_info=True)
+        return jsonify({
+            'error': 'Unable to load dashboard data',
+            'details': str(exc)
+        }), 500

@@ -159,8 +159,14 @@ export const getDashboardStats = async () => {
     // API container is unavailable. Fall back to the same guest dashboard data
     // used by the server so the dashboard continues to render instead of
     // surfacing a raw Axios "Network Error" in the browser console.
+    console.error('getDashboardStats error:', {
+      status: error.response?.status,
+      message: error.response?.data?.error || error.message,
+      details: error.response?.data?.details
+    });
+    
     if (!error?.response) {
-      console.warn('Dashboard stats API unavailable, using guest fallback payload.', error?.message || error);
+      console.warn('Dashboard stats API unavailable (network error), using guest fallback payload.', error?.message || error);
       return {
         fallback: true,
         stats: {
@@ -177,7 +183,27 @@ export const getDashboardStats = async () => {
         ],
       };
     }
-
+    
+    // If we get a 5xx error, also return fallback to prevent dashboard from breaking
+    if (error.response?.status >= 500) {
+      console.warn('Dashboard stats API returned 5xx error, using guest fallback payload.');
+      return {
+        fallback: true,
+        stats: {
+          interviews_completed: 18,
+          average_score: 82,
+          confidence_score: 88,
+        },
+        recent_interviews: [
+          { role: 'Software Engineer', score: 88, date: '2026-08-01', confidence: 90 },
+          { role: 'Product Manager', score: 79, date: '2026-07-29', confidence: 85 },
+          { role: 'Data Analyst', score: 91, date: '2026-07-24', confidence: 92 },
+          { role: 'UX Designer', score: 75, date: '2026-07-20', confidence: 80 },
+          { role: 'DevOps Engineer', score: 85, date: '2026-07-15', confidence: 88 },
+        ],
+      };
+    }
+    
     throw error;
   }
 };
@@ -347,9 +373,42 @@ export const getQuestionCategories = async () => {
   const cached = getCachedData(cacheKey);
   if (cached) return cached;
 
-  const response = await api.get('/api/subscription/question-categories');
-  setCachedData(cacheKey, response.data, CACHE_TTL.questionCategories);
-  return response.data;
+  try {
+    const response = await api.get('/api/subscription/question-categories');
+    setCachedData(cacheKey, response.data, CACHE_TTL.questionCategories);
+    return response.data;
+  } catch (error) {
+    const status = error?.response?.status;
+    const errorMessage = error?.response?.data?.error || error?.message || 'Failed to load question categories';
+    
+    console.error('[getQuestionCategories] Error:', {
+      status,
+      message: errorMessage,
+      details: error?.response?.data?.details || 'No additional details',
+      serverMessage: error?.response?.data,
+      fullError: error
+    });
+    
+    // Return safe fallback for technical and behavioral categories when backend is unavailable or erroring
+    // This includes network errors (!error?.response) and 5xx server errors (status >= 500)
+    const isNetworkError = !error?.response;
+    const isServerError = status >= 500;
+    
+    if (isNetworkError || isServerError) {
+      console.warn(`[getQuestionCategories] Returning fallback categories (network=${isNetworkError}, server_error=${isServerError})`);
+      return {
+        available_categories: ['technical', 'behavioral'],
+        tier: 'free',
+        interviews_remaining: 'unknown',
+        monthly_limit: 'unknown',
+        all_categories_available: false,
+        fallback: true
+      };
+    }
+    
+    // Re-throw only non-5xx, non-network errors
+    throw new Error(errorMessage);
+  }
 };
 
 export const getAdvancedAnalytics = async () => {

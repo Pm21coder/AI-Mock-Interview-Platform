@@ -496,17 +496,37 @@ def check_feature_access(feature_name):
 @token_required
 def get_question_categories():
     """Get available question categories for the user's subscription tier"""
+    import logging
+    logger = logging.getLogger(__name__)
+    
     try:
         current_user = _get_current_user()
+        logger.info(f"get_question_categories: current_user type = {type(current_user)}, value = {current_user}")
+        
         if not current_user:
-            return jsonify({'error': 'Unauthorized'}), 401
+            logger.warning("get_question_categories: current_user is None or falsy")
+            return jsonify({'error': 'Unauthorized: no user context'}), 401
         
         user_id = current_user.get('_id')
         if not user_id:
-            return jsonify({'error': 'Invalid user'}), 400
+            logger.warning(f"get_question_categories: user_id missing from current_user: {current_user}")
+            return jsonify({'error': 'Invalid user context: missing _id'}), 400
 
-        categories = subscription_service.get_available_question_categories(user_id)
-        sub = subscription_service.get_user_subscription(user_id)
+        logger.info(f"get_question_categories: fetching categories for user {user_id}")
+        
+        try:
+            categories = subscription_service.get_available_question_categories(user_id)
+            logger.info(f"get_question_categories: categories fetched = {categories}")
+        except Exception as cat_error:
+            logger.error(f"Error fetching categories for user {user_id}: {str(cat_error)}", exc_info=True)
+            return jsonify({'error': f'Failed to fetch categories: {str(cat_error)}'}), 500
+        
+        try:
+            sub = subscription_service.get_user_subscription(user_id)
+            logger.info(f"get_question_categories: subscription fetched, tier = {sub.get('tier')}")
+        except Exception as sub_error:
+            logger.error(f"Error fetching subscription for user {user_id}: {str(sub_error)}", exc_info=True)
+            return jsonify({'error': f'Failed to fetch subscription: {str(sub_error)}'}), 500
         
         response = {
             'available_categories': categories,
@@ -516,12 +536,12 @@ def get_question_categories():
             'all_categories_available': categories == ['technical', 'behavioral', 'situational', 'system_design']
         }
         
+        logger.info(f"get_question_categories: returning response with {len(categories)} categories")
         return jsonify(optimize_response(response)), 200
+        
     except Exception as e:
-        import logging
-        logger = logging.getLogger(__name__)
-        logger.error(f'Error in get_question_categories: {str(e)}', exc_info=True)
-        return jsonify({'error': 'Failed to load question categories. Please try again.'}), 500
+        logger.error(f'Unexpected error in get_question_categories: {str(e)}', exc_info=True)
+        return jsonify({'error': f'Server error: {str(e)}'}), 500
 
 
 @subscription_bp.route('/analytics', methods=['GET'])
