@@ -445,14 +445,16 @@ function InterviewSessionContent() {
         return;
       }
 
-      setLoadError(questionLoadError.message);
+      const serverReqId = error?.response?.data?.req_id || null;
+      const displayedMessage = serverReqId ? `${questionLoadError.message} (ref: ${serverReqId})` : questionLoadError.message;
+      setLoadError(displayedMessage);
       setErrorCode(questionLoadError.errorCode);
       setCanUpgradeForLoadError(questionLoadError.isPlanRestriction);
 
       if (questionLoadError.isPlanRestriction) {
         setShowLimitModal(true);
       } else {
-        toast.error(questionLoadError.message, { duration: 5000 });
+        toast.error(displayedMessage, { duration: 5000 });
       }
 
       if (!error.response || error.response.status >= 500 || error.code === 'ERR_NETWORK') {
@@ -595,9 +597,10 @@ function InterviewSessionContent() {
       }
 
       const errorMessage = error.response?.data?.error || error.message || 'Failed to analyze answer';
-      setLoadError(`Error: ${errorMessage}`);
-      toast.error(errorMessage, { duration: 5000 });
-      console.error('Answer submission error:', error);
+      const reqId = error.response?.data?.req_id || null;
+      setLoadError(reqId ? `Error: ${errorMessage} (ref: ${reqId})` : `Error: ${errorMessage}`);
+      toast.error(reqId ? `${errorMessage} (ref: ${reqId})` : errorMessage, { duration: 5000 });
+      console.error('Answer submission error:', error, reqId ? `req_id=${reqId}` : '');
     } finally {
       setIsProcessing(false);
     }

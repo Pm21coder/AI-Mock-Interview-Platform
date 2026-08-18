@@ -148,6 +148,7 @@ def current_subscription_user_id():
 @token_required
 @limiter.limit("10 per minute")  # Prevent abuse of expensive AI API calls
 def generate_questions():
+    req_id = str(uuid4())
     data = request.get_json(silent=True) or {}
     job_role = (data.get('job_role') or '').strip()
     category = (data.get('category') or 'technical').strip().lower()
@@ -214,7 +215,7 @@ def generate_questions():
                 try:
                     job = rq_queue.enqueue('app.routes.interview.run_generate_questions_job', data_payload)
                     logger.info('Enqueued generate_questions job to Redis', extra={'job_id': job.get_id(), 'user_id': str(user_id)})
-                    response = jsonify({'job_id': job.get_id()})
+                    response = jsonify({'job_id': job.get_id(), 'req_id': req_id})
                     response.status_code = 202
                     return response
                 except Exception as exc:
@@ -251,7 +252,7 @@ def generate_questions():
             thread = Thread(target=_run_local_job, args=(job_id, data_payload), daemon=True)
             thread.start()
 
-            response = jsonify({'job_id': job_id})
+            response = jsonify({'job_id': job_id, 'req_id': req_id})
             response.status_code = 202
             return response
 
@@ -316,6 +317,7 @@ def generate_questions():
             'session_id': session_id,
             'questions': session_document['questions'],
             'subscription': subscription,
+            'req_id': req_id,
         })
     except Exception as exc:
         logger.exception('Failed to generate questions for user %s', user_id)
@@ -344,6 +346,8 @@ def _redis_required_guard():
 @token_required
 @limiter.limit("10 per minute")
 def generate_questions_job():
+    # Per-request id for correlation
+    req_id = str(uuid4())
     """Start a background job to generate questions and return a job_id immediately.
     Client should poll /api/interview/job/<job_id> for status/result.
     """
@@ -394,7 +398,7 @@ def generate_questions_job():
     thread = Thread(target=_run_local_job, args=(job_id, data), daemon=True)
     thread.start()
 
-    response = jsonify({'job_id': job_id})
+    response = jsonify({'job_id': job_id, 'req_id': req_id})
     response.status_code = 202
     return response
 
@@ -403,6 +407,7 @@ def generate_questions_job():
 @token_required
 @limiter.limit("10 per minute")
 def stream_generate_questions():
+    req_id = str(uuid4())
     """Stream job events via Server-Sent Events (SSE)-style text/event-stream.
     This endpoint enqueues the same background job and then streams status updates
     and the final result as JSON in 'data:' SSE events. The frontend can connect
@@ -445,8 +450,8 @@ def stream_generate_questions():
 
     @stream_with_context
     def event_stream():
-        # Immediately tell the client we've started and provide job_id
-        yield sse_event({'status': 'started', 'job_id': job_id})
+        # Immediately tell the client we've started and provide job_id and req_id
+        yield sse_event({'status': 'started', 'job_id': job_id, 'req_id': req_id})
         # Poll job status and yield events
         for chunk in poll_job_and_stream(job_id, timeout_seconds=max(60, int(Config.STREAM_TIMEOUT_SECONDS or 60))):
             yield chunk
@@ -611,6 +616,8 @@ def analyze_answer():
             'cv_analysis': cv_analysis,
             'timestamp': utc_now().isoformat(),
         }
+        # Attach request id to allow frontend <-> backend correlation
+        combined_feedback['req_id'] = req_id
         response_record = {'question_index': question_index, 'answer': answer, 'feedback': combined_feedback}
         if session_id in demo_sessions:
             demo_sessions[session_id]['responses'].append(response_record)
@@ -626,9 +633,12 @@ def analyze_answer():
     except Exception as exc:
         error_msg = str(exc)
         logger.exception(f'Error analyzing answer for user {user_id}: %s', error_msg)
-        # Return a safe, non-sensitive error message to the client while logging details
+        # Return a safe, non-sensitive error message to the client while logging details.
+        # Include the per-request id so frontend can correlate logs with server-side traces.
         return jsonify({
             'error': 'Failed to analyze answer. Please try again.',
+            'code': 'ANALYSIS_FAILED',
+            'req_id': req_id,
             'details': None,
         }), 500
 
@@ -648,7 +658,7 @@ def analyze_answer_job():
     if use_redis_queue and rq_queue is not None:
         try:
             job = rq_queue.enqueue('app.routes.interview.run_analyze_answer_job', data)
-            response = jsonify({'job_id': job.get_id()})
+            response = jsonify({'job_id': job.get_id(), 'req_id': str(uuid4())})
             response.status_code = 202
             return response
         except Exception as exc:
@@ -674,7 +684,7 @@ def analyze_answer_job():
     thread = Thread(target=_run_local_analysis, args=(job_id, data), daemon=True)
     thread.start()
 
-    response = jsonify({'job_id': job_id})
+    response = jsonify({'job_id': job_id, 'req_id': str(uuid4())})
     response.status_code = 202
     return response
 
@@ -725,7 +735,8 @@ def stream_analyze_answer():
 
     @stream_with_context
     def event_stream():
-        yield sse_event({'status': 'started', 'job_id': job_id})
+        # Include a per-request ID on the initial event for easier correlation
+        yield sse_event({'status': 'started', 'job_id': job_id, 'req_id': str(uuid4())})
         for chunk in poll_job_and_stream(job_id, timeout_seconds=max(60, int(Config.STREAM_TIMEOUT_SECONDS or 60))):
             yield chunk
 

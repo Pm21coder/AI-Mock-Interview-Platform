@@ -13,7 +13,10 @@ const REQUEST_TIMEOUTS = {
   resumeAnalysis: 10_000,
   resumeHistory: 10_000,
   subscriptionStatus: 8_000,
-  questionCategories: 8_000,
+  // Increase dashboard and question-category lookups timeout to be tolerant of
+  // cold starts and occasional backend latency (e.g., pre-warming, DB rebuilds).
+  questionCategories: 30_000,
+  dashboardStats: 30_000,
   createOrder: 15_000,
   // Allow longer AI generation time in environments with higher server limits.
   // Increase to 120s for question generation which can be expensive.
@@ -403,8 +406,24 @@ export const getQuestions = async (params, options = {}) => {
     let timeout = REQUEST_TIMEOUTS.interviewQuestions;
 
     while (attempt < maxAttempts) {
+      // Create per-attempt forwarding so a previously-aborted controller
+      // doesn't cancel subsequent fallback attempts immediately.
+      let fallbackController = null;
+      let onAbort = null;
       try {
-        const response = await api.post('/api/interview/generate-questions', params, { timeout, validateStatus: (s) => s < 500, signal: options.signal });
+        let signalForAttempt = undefined;
+        if (options && options.signal) {
+          fallbackController = new AbortController();
+          onAbort = () => {
+            try { fallbackController.abort(); } catch (e) { /* ignore */ }
+          };
+          if (options.signal.addEventListener) options.signal.addEventListener('abort', onAbort);
+          if (options.signal.aborted) fallbackController.abort();
+          signalForAttempt = fallbackController.signal;
+        }
+
+        const response = await api.post('/api/interview/generate-questions', params, { timeout, validateStatus: (s) => s < 500, signal: signalForAttempt });
+
         // If server accepted as an async job, delegate to the job poller
         if (response.status === 202 && response.data?.job_id) {
           const jobId = response.data.job_id;
@@ -447,6 +466,15 @@ export const getQuestions = async (params, options = {}) => {
         } else {
           logApiError('/api/interview/generate-questions', err);
           break;
+        }
+      } finally {
+        // Cleanup the forwarded abort listener to avoid leaking handlers across attempts.
+        try {
+          if (options && options.signal && onAbort && options.signal.removeEventListener) {
+            options.signal.removeEventListener('abort', onAbort);
+          }
+        } catch (cleanupErr) {
+          // Non-fatal, ignore listener cleanup failures
         }
       }
     }
@@ -609,7 +637,7 @@ export const getDashboardStats = async (options = { forceRefresh: false }) => {
 
     // Fetch fresh data from the backend (no automatic timestamp param)
     const response = await api.get('/api/interview/dashboard-stats', {
-      timeout: REQUEST_TIMEOUTS.questionCategories,
+      timeout: REQUEST_TIMEOUTS.dashboardStats,
     });
 
     _cachedDashboardStats = response.data;

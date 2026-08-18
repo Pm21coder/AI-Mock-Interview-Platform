@@ -176,3 +176,4 @@ class Config:
         'basic': 37500,
         'pro': 75000,
     }
+

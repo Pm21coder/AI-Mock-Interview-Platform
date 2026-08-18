@@ -160,20 +160,23 @@ function SubscriptionPageContent() {
       const scriptLoaded = await loadRazorpayScript();
 
       if (!scriptLoaded || !window.Razorpay) {
-        console.warn('Razorpay SDK not available, falling back to demo mode');
-        // Fall back to demo mode if SDK can't load
-        await handleDemoUpgrade(tier);
+        console.error('Razorpay SDK not available. Payment cannot proceed.');
+        setError('Payment service is currently unavailable. Please try again later or contact support.');
+        setProcessing(false);
+        setProcessingTier(null);
         return;
       }
 
       let orderData;
       try {
-        orderData = await createRazorpayOrder({ tier, demo_mode: false });
+        orderData = await createRazorpayOrder({ tier });
       } catch (orderError) {
-        // If order creation fails with 400 (missing credentials), use demo mode
-        if (orderError.status === 400 && orderError.message?.includes('not configured')) {
-          console.warn('Razorpay credentials not configured, using demo mode for development');
-          await handleDemoUpgrade(tier);
+        // If order creation fails with 400 (missing credentials), surface a clear error
+        if (orderError.status === 400 && orderError.message?.toLowerCase?.().includes('not configured')) {
+          console.error('Razorpay credentials not configured on server.');
+          setError('Payment gateway is not configured. Please contact support.');
+          setProcessing(false);
+          setProcessingTier(null);
           return;
         }
         throw orderError;
@@ -261,42 +264,6 @@ function SubscriptionPageContent() {
     }
   };
 
-  const handleDemoUpgrade = async (tier) => {
-    if (!hasAuthToken()) {
-      setError('Please sign in before making a payment.');
-      router.push('/auth?next=/subscription');
-      return;
-    }
-
-    try {
-      setProcessing(true);
-      setProcessingTier(tier);
-      setError(null);
-
-      const data = await createRazorpayOrder({ tier, demo_mode: true });
-      if (!data.order_id) {
-        throw new Error(data.error || 'Unable to create demo order');
-      }
-
-      const result = await verifyRazorpayPayment({
-        razorpay_order_id: data.order_id,
-        razorpay_payment_id: 'pay_demo_123',
-        razorpay_signature: 'demo_signature',
-      });
-
-      if (result.status !== 'success') {
-        throw new Error(result.error || 'Demo payment verification failed');
-      }
-
-      await refreshSubscription();
-      alert(`Demo payment successful! Your account has been upgraded to ${tier.toUpperCase()}.`);
-    } catch (err) {
-      setError(err.response?.data?.error || err.message || 'Demo payment failed');
-    } finally {
-      setProcessing(false);
-      setProcessingTier(null);
-    }
-  };
 
   const plans = [
     {
@@ -504,15 +471,6 @@ function SubscriptionPageContent() {
                     ? 'Processing...'
                     : plan.cta}
                 </button>
-                {!plan.disabled && plan.price > 0 && (
-                  <button
-                    onClick={() => handleDemoUpgrade(plan.id)}
-                    disabled={processing}
-                    className="w-full rounded-lg border border-dashed border-gray-300 py-2 px-3 text-xs font-medium text-gray-600 hover:border-blue-500 hover:text-blue-600"
-                  >
-                    ⚡ Test Upgrade (Demo Mode)
-                  </button>
-                )}
               </div>
             </div>
           ))}
