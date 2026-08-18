@@ -20,10 +20,32 @@ from app.cache_utils import optimize_response
 logger = logging.getLogger(__name__)
 
 interview_bp = Blueprint('interview', __name__)
+
+# Service singletons
 gemini_service = GeminiService()
 nlp_service = NLPService()
 dashboard_service = DashboardService()
 subscription_service = SubscriptionService()
+
+# Dev-only diagnostic endpoint to check Gemini initialization and last error.
+# Only enabled when Flask is running in debug mode to avoid exposing internals in production.
+@interview_bp.route('/debug/gemini-status', methods=['GET'])
+def debug_gemini_status():
+    # Only allow this in debug mode
+    try:
+        if not current_app.debug:
+            return jsonify({'error': 'Not found'}), 404
+    except Exception:
+        # If current_app not available, be conservative
+        return jsonify({'error': 'Not found'}), 404
+
+    try:
+        status = gemini_service.get_status()
+        # Do not return any secrets — get_status is intentionally high-level
+        return jsonify({'success': True, 'gemini_status': status}), 200
+    except Exception as exc:
+        logger.exception('Failed to read Gemini status: %s', exc)
+        return jsonify({'error': 'Failed to read Gemini status'}), 500
 
 # The app remains usable locally when MongoDB has not been started. Data in
 # this store lasts for the lifetime of the backend process.
@@ -575,8 +597,20 @@ def analyze_answer():
                 expected_answer, 
                 is_premium=is_premium
             )
+            # If the service is not available, emit diagnostic info to help correlate logs
+            if not gemini_service.is_available:
+                try:
+                    status = gemini_service.get_status()
+                except Exception:
+                    status = {'available': False}
+                logger.warning('GeminiService not available when analyzing answer', extra={'req_id': req_id, 'gemini_status': status})
         except Exception as gem_exc:
-            logger.exception('Gemini analysis failed, falling back to heuristic feedback: %s', gem_exc)
+            # Include gemini diagnostic status to aid debugging of 500s
+            try:
+                status = gemini_service.get_status()
+            except Exception:
+                status = {'available': False}
+            logger.exception('Gemini analysis failed, falling back to heuristic feedback: %s; gemini_status=%s', gem_exc, status)
             gemini_feedback = gemini_service.get_fallback_feedback(is_premium=is_premium, user_answer=answer, expected_answer=expected_answer)
         
         # Provide video analysis only if feature is available
@@ -632,15 +666,65 @@ def analyze_answer():
         return jsonify(combined_feedback)
     except Exception as exc:
         error_msg = str(exc)
-        logger.exception(f'Error analyzing answer for user {user_id}: %s', error_msg)
-        # Return a safe, non-sensitive error message to the client while logging details.
-        # Include the per-request id so frontend can correlate logs with server-side traces.
-        return jsonify({
-            'error': 'Failed to analyze answer. Please try again.',
-            'code': 'ANALYSIS_FAILED',
-            'req_id': req_id,
-            'details': None,
-        }), 500
+        # Include Gemini diagnostic status if available to help root-cause analysis
+        try:
+            gemini_status = gemini_service.get_status()
+        except Exception:
+            gemini_status = None
+        logger.exception('Error analyzing answer for user %s: %s; gemini_status=%s', user_id, error_msg, gemini_status)
+        # As a robust fallback, return heuristic feedback instead of a 500 so the frontend
+        # can continue to show useful feedback and avoid hard errors.
+        try:
+            # Heuristic NLP fallback
+            try:
+                nlp_analysis = nlp_service.analyze_answer_quality(answer, expected_answer)
+            except Exception:
+                nlp_analysis = {'word_count': len(answer.split()), 'sentence_count': 0, 'sentiment': {'polarity': 0, 'subjectivity': 0}, 'keyword_coverage': 0, 'similarity_score': 0, 'grammar_score': 0, 'overall_quality': 0.0}
+
+            # Gemini heuristic fallback feedback
+            try:
+                gemini_feedback = gemini_service.get_fallback_feedback(is_premium=is_premium, user_answer=answer, expected_answer=expected_answer)
+            except Exception:
+                gemini_feedback = {'content_score': 50, 'structure_score': 50, 'clarity_score': 50, 'overall_score': 50, 'strengths': [], 'improvements': [], 'detailed_feedback': 'Fallback feedback unavailable.'}
+
+            # CV analysis fallback
+            cv_analysis = {
+                'average_confidence': 0.75,
+                'overall_assessment': 'No video data - estimated from answer quality',
+                'total_frames_analyzed': 0,
+            }
+
+            combined_feedback = {
+                'nlp_analysis': nlp_analysis,
+                'gemini_feedback': gemini_feedback,
+                'cv_analysis': cv_analysis,
+                'timestamp': utc_now().isoformat(),
+                'req_id': req_id,
+            }
+
+            # Persist minimal record if possible
+            response_record = {'question_index': question_index, 'answer': answer, 'feedback': combined_feedback}
+            if session_id in demo_sessions:
+                demo_sessions[session_id]['responses'].append(response_record)
+            if user_id != 'guest':
+                try:
+                    mongo.db.interviews.update_one(
+                        {'_id': session_id, 'user_id': user_id},
+                        {'$push': {'responses': response_record}},
+                    )
+                except Exception as db_exc:
+                    logger.warning(f'Failed to update interview in DB during fallback: {db_exc}')
+
+            return jsonify(combined_feedback), 200
+        except Exception as fallback_exc:
+            # If even the fallback path fails, return a minimal safe JSON response with req_id
+            logger.exception('Fallback for analyze_answer also failed: %s', fallback_exc)
+            return jsonify({
+                'error': 'Failed to analyze answer. Please try again.',
+                'code': 'ANALYSIS_FAILED',
+                'req_id': req_id,
+                'details': None,
+            }), 500
 
 
 @interview_bp.route('/analyze-answer-job', methods=['POST'])
@@ -654,6 +738,13 @@ def analyze_answer_job():
         return guard_resp
 
     data = request.get_json(silent=True) or {}
+
+    # Basic payload validation to avoid enqueuing empty jobs that will fail
+    question = data.get('question')
+    answer = (data.get('answer') or '').strip()
+    if not question or not answer:
+        logger.warning('analyze_answer_job rejected: missing question or answer', extra={'req_id': str(uuid4())})
+        return jsonify({'error': 'Missing required fields: question and answer'}), 400
 
     if use_redis_queue and rq_queue is not None:
         try:

@@ -2,6 +2,7 @@ import json
 import re
 import threading
 import time
+import logging
 
 try:
     import google.genai as genai
@@ -20,6 +21,8 @@ if not genai:
         types = None
 
 from app.config import Config
+
+logger = logging.getLogger(__name__)
 
 
 class GeminiService:
@@ -87,11 +90,13 @@ class GeminiService:
         self.last_error = None
 
         if not Config.ENABLE_GEMINI:
-            print('GeminiService: Gemini is disabled in configuration')
+            logger.info('GeminiService: Gemini is disabled in configuration')
+            self.last_error = 'Gemini disabled by configuration'
             return
 
         if not api_key or api_key == 'demo-key' or api_key == 'YOUR_GOOGLE_GEMINI_API_KEY_HERE':
-            print('GeminiService: No valid API key configured')
+            logger.warning('GeminiService: No valid API key configured')
+            self.last_error = 'No API key configured'
             return
 
         # Try new SDK first (google.genai)
@@ -99,12 +104,13 @@ class GeminiService:
             try:
                 self.client = genai.Client(api_key=api_key)
                 self.use_new_sdk = True
-                print(f'GeminiService: Initialized with new google.genai SDK')
+                logger.info('GeminiService: Initialized with new google.genai SDK')
                 return
             except Exception as exc:
-                print(f'GeminiService: Failed to initialize with google.genai SDK: {exc}')
+                logger.exception('GeminiService: Failed to initialize with google.genai SDK')
                 self.client = None
                 self.use_new_sdk = False
+                self.last_error = str(exc)
         
         # Fallback to legacy SDK (google.generativeai)
         if genai and hasattr(genai, 'configure'):
@@ -112,13 +118,16 @@ class GeminiService:
                 genai.configure(api_key=api_key)
                 self.model = genai.GenerativeModel(self.model_name)
                 self.use_new_sdk = False
-                print(f'GeminiService: Initialized with legacy google.generativeai SDK')
+                logger.info('GeminiService: Initialized with legacy google.generativeai SDK')
             except Exception as exc:
-                print(f'GeminiService: Failed to initialize with google.generativeai SDK: {exc}')
+                logger.exception('GeminiService: Failed to initialize with google.generativeai SDK')
                 self.model = None
+                self.last_error = str(exc)
         
         if not self.client and not self.model:
-            print('GeminiService: Failed to initialize any SDK')
+            logger.error('GeminiService: Failed to initialize any SDK; Gemini unavailable')
+            if not self.last_error:
+                self.last_error = 'Failed to initialize any SDK'
 
     @property
     def is_available(self):
@@ -165,8 +174,10 @@ class GeminiService:
                     
                 last_error = ValueError('Gemini returned an empty response')
             except Exception as exc:
-                print(f'GeminiService._generate_json: model {model_name} failed: {exc}')
+                logger.exception('GeminiService._generate_json: model %s failed', model_name)
                 last_error = exc
+                # record last error for diagnostic use
+                self.last_error = str(exc)
                 if not self.use_new_sdk:
                     self.model = None  # Reset model on failure to try next one
                 continue
@@ -251,7 +262,7 @@ class GeminiService:
         """
 
         if not self.is_available:
-            print('GeminiService.generate_questions: Gemini unavailable, using fallback')
+            logger.warning('GeminiService.generate_questions: Gemini unavailable, using fallback; last_error=%s', self.last_error)
             return self.get_fallback_questions(job_role, category, num_questions)
 
         start = time.time()
@@ -264,9 +275,9 @@ class GeminiService:
                 2048,
             )
             elapsed = time.time() - start
-            print(f'GeminiService.generate_questions: got response in {elapsed:.2f}s; text_len={len(text)}')
+            logger.info('GeminiService.generate_questions: got response in %.2fs; text_len=%d', elapsed, len(text))
             if not text:
-                print('GeminiService.generate_questions: empty text, using fallback')
+                logger.warning('GeminiService.generate_questions: empty text, using fallback')
                 return self.get_fallback_questions(job_role, category, num_questions)
             questions = self._parse_json_response(text)
             if not isinstance(questions, list):
@@ -301,8 +312,8 @@ class GeminiService:
             return normalized_questions[:num_questions]
         except Exception as exc:
             elapsed = time.time() - start
-            print(f'Error generating questions ({elapsed:.2f}s): {exc}')
-            print(f'Exception details: {type(exc).__name__}: {exc}')
+            logger.exception('Error generating questions (%.2fs): %s', elapsed, exc)
+            self.last_error = str(exc)
             return self.get_fallback_questions(job_role, category, num_questions)
 
     def analyze_answer(self, question, user_answer, expected_answer, is_premium=False):
@@ -344,7 +355,7 @@ class GeminiService:
         """
 
         if not self.is_available:
-            print('GeminiService.analyze_answer: Gemini unavailable, using fallback')
+            logger.warning('GeminiService.analyze_answer: Gemini unavailable, using fallback; last_error=%s', self.last_error)
             return self.get_fallback_feedback(is_premium=is_premium, user_answer=user_answer, expected_answer=expected_answer)
 
         start = time.time()
@@ -357,9 +368,9 @@ class GeminiService:
                 2048 if is_premium else 1024,
             )
             elapsed = time.time() - start
-            print(f'GeminiService.analyze_answer: got response in {elapsed:.2f}s; text_len={len(text)}')
+            logger.info('GeminiService.analyze_answer: got response in %.2fs; text_len=%d', elapsed, len(text))
             if not text:
-                print('GeminiService.analyze_answer: empty text, using fallback')
+                logger.warning('GeminiService.analyze_answer: empty text, using fallback')
                 return self.get_fallback_feedback(is_premium=is_premium, user_answer=user_answer, expected_answer=expected_answer)
             feedback = self._parse_json_response(text)
             if not isinstance(feedback, dict):
@@ -367,8 +378,8 @@ class GeminiService:
             return feedback
         except Exception as exc:
             elapsed = time.time() - start
-            print(f'Error analyzing answer ({elapsed:.2f}s): {exc}')
-            print(f'Exception details: {type(exc).__name__}: {exc}')
+            logger.exception('Error analyzing answer (%.2fs): %s', elapsed, exc)
+            self.last_error = str(exc)
             return self.get_fallback_feedback(is_premium=is_premium, user_answer=user_answer, expected_answer=expected_answer)
 
     def get_fallback_questions(self, job_role, category, num_questions=5):
@@ -662,7 +673,7 @@ class GeminiService:
             elapsed = time.time() - start
             print(f'GeminiService.analyze_resume: got response in {elapsed:.2f}s; text_len={len(text)}')
             if not text:
-                print('GeminiService.analyze_resume: empty text, using fallback')
+                logger.warning('GeminiService.analyze_resume: empty text, using fallback')
                 return self.get_fallback_resume_analysis()
             analysis = self._parse_json_response(text)
             if not isinstance(analysis, dict):
@@ -670,8 +681,8 @@ class GeminiService:
             return analysis
         except Exception as exc:
             elapsed = time.time() - start
-            print(f'Error analyzing resume ({elapsed:.2f}s): {exc}')
-            print(f'Exception details: {type(exc).__name__}: {exc}')
+            logger.exception('Error analyzing resume (%.2fs): %s', elapsed, exc)
+            self.last_error = str(exc)
             return self.get_fallback_resume_analysis()
 
     def get_fallback_resume_analysis(self):
@@ -850,3 +861,15 @@ class GeminiService:
             )
         
         return feedback
+
+    def get_status(self):
+        """Return diagnostic status for the Gemini service for observability.
+
+        Do not expose secrets in logs; this method returns high-level info only.
+        """
+        return {
+            'available': self.is_available,
+            'last_error': str(self.last_error) if self.last_error else None,
+            'model': getattr(self, 'model_name', None),
+            'use_new_sdk': bool(self.use_new_sdk),
+        }

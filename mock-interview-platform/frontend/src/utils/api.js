@@ -10,19 +10,22 @@ const CACHE_TTL = {
 };
 
 const REQUEST_TIMEOUTS = {
-  resumeAnalysis: 10_000,
-  resumeHistory: 10_000,
-  subscriptionStatus: 8_000,
+  // Resume/text analysis related timeouts
+  resumeAnalysis: 20_000, // increased from 10s to tolerate backend cold-starts
+  resumeHistory: 20_000, // increased from 10s
+  // Subscription status can occasionally be slow during billing calls
+  subscriptionStatus: 15_000, // increased from 8s
   // Increase dashboard and question-category lookups timeout to be tolerant of
   // cold starts and occasional backend latency (e.g., pre-warming, DB rebuilds).
   questionCategories: 30_000,
   dashboardStats: 30_000,
   createOrder: 15_000,
   // Allow longer AI generation time in environments with higher server limits.
-  // Increase to 120s for question generation which can be expensive.
+  // Question generation can be expensive; keep a generous timeout.
   interviewQuestions: 120_000,
-  // Client-side timeout for answer analysis. Allow up to 120s for complex analysis.
-  interviewAnalysis: 120_000,
+  // Client-side timeout for answer analysis. Increase to 60s to cover longer LLM runs
+  // while still relying on background-job/polling as primary flow.
+  interviewAnalysis: 60_000,
 };
 
 function responseBodyForLog(error) {
@@ -47,6 +50,8 @@ function logApiError(endpoint, error) {
   try {
     const isCanceled = (
       error && (
+        // Prefer axios.isCancel if available; fall back to common cancel markers
+        (typeof axios !== 'undefined' && typeof axios.isCancel === 'function' && axios.isCancel(error)) ||
         error.code === 'ERR_CANCELED' ||
         error.name === 'CanceledError' ||
         error.name === 'AbortError' ||
@@ -55,11 +60,8 @@ function logApiError(endpoint, error) {
     );
     if (isCanceled) {
       // Keep cancellations at debug level and avoid spammy stack traces.
-      if (typeof process !== 'undefined' && process.env && process.env.NODE_ENV !== 'production') {
-        console.debug(`API request canceled at ${endpoint}:`, error?.message || error);
-      } else {
-        console.warn(`API request canceled at ${endpoint}: ${error?.message || 'canceled'}`);
-      }
+      // Use debug in both dev and production to reduce noise from expected cancels.
+      console.debug(`API request canceled at ${endpoint}:`, error?.message || error);
       return;
     }
   } catch (e) {
@@ -217,6 +219,38 @@ const api = axios.create({
   },
 });
 
+// Simple built-in retry mechanism to handle transient network issues and
+// backend cold-starts. This avoids adding a new dependency (axios-retry)
+// while providing exponential backoff retries for common conditions.
+api.interceptors.response.use(undefined, async (error) => {
+  const config = error.config || {};
+  // Do not retry for requests that opt-out explicitly
+  if (config.__noRetry) return Promise.reject(error);
+
+  config.__retryCount = config.__retryCount || 0;
+  const maxRetries = typeof config.__maxRetries === 'number' ? config.__maxRetries : 2;
+
+  // Determine if error is retryable: network error, timeout, or 5xx without body
+  const isTimeout = error && (error.code === 'ECONNABORTED' || (error.message && error.message.toLowerCase().includes('timeout')));
+  const isNetworkError = !error.response;
+  const isServerError = error.response && error.response.status >= 500 && error.response.status < 600;
+
+  const shouldRetry = isTimeout || isNetworkError || isServerError;
+
+  if (shouldRetry && config.__retryCount < maxRetries) {
+    config.__retryCount += 1;
+    const delayMs = Math.min(1000 * Math.pow(2, config.__retryCount - 1), 5000);
+    await new Promise((res) => setTimeout(res, delayMs));
+    try {
+      return api(config);
+    } catch (e) {
+      return Promise.reject(e);
+    }
+  }
+
+  return Promise.reject(error);
+});
+
 api.interceptors.request.use((config) => {
   if (typeof window !== 'undefined') {
     const token = window.localStorage.getItem('auth_token');
@@ -298,6 +332,96 @@ async function createJobAndPoll(jobEndpoint, pollEndpointBase, payload, totalTim
     // Allow 202 responses without throwing. Wrap create in try/catch so 503 responses
     // can be detected and surfaced to the UI as a special actionable error.
     let createResp;
+
+    // Storage key to persist last job for this endpoint (helps resume after reload)
+    const storageKey = `last_job:${jobEndpoint}`;
+    const shouldPersist = options.persist !== false;
+    const resumeFromStorage = options.resumeFromStorage !== false; // default true
+
+    // Nested helper: poll loop encapsulated so it can be reused for resumes
+    const pollLoop = async (jobId) => {
+      const start = Date.now();
+      let interval = typeof options.pollIntervalBase === 'number' ? options.pollIntervalBase : 1000;
+      const maxInterval = typeof options.pollIntervalMax === 'number' ? options.pollIntervalMax : 2000;
+      const maxDuration = Math.min(totalTimeout, options.maxPollDuration || 180_000);
+
+      while (Date.now() - start < maxDuration) {
+        try {
+          if (signal && signal.aborted) {
+            const cancelErr = new Error('Request canceled');
+            cancelErr.name = 'AbortError';
+            throw cancelErr;
+          }
+
+          const remaining = Math.max(1000, maxDuration - (Date.now() - start));
+          const statusResp = await api.get(`${pollEndpointBase}/${jobId}`, { timeout: Math.min(10_000, remaining), validateStatus: (s) => s < 500, signal });
+          const data = statusResp.data || {};
+          const status = data.status;
+          if (status === 'completed') {
+            // Remove persisted marker
+            try { if (shouldPersist && typeof window !== 'undefined') window.localStorage.removeItem(storageKey); } catch (e) {}
+            return data.result || data;
+          }
+          if (status === 'failed') {
+            try { if (shouldPersist && typeof window !== 'undefined') window.localStorage.removeItem(storageKey); } catch (e) {}
+            throw new Error(data.error || 'Job failed');
+          }
+        } catch (pollErr) {
+          if (pollErr && (pollErr.name === 'AbortError' || pollErr.code === 'ERR_CANCELED')) {
+            throw pollErr;
+          }
+
+          // Detect socket-level resets / proxy hangups during polling and escalate
+          try {
+            const pm = String(pollErr?.message || '').toLowerCase();
+            if (pollErr && (pollErr.code === 'ECONNRESET' || pm.includes('socket hang up') || pm.includes('connection reset'))) {
+              const out = new Error(`Socket hang up / connection reset while polling job ${jobId}`);
+              out.isSocketHangUp = true;
+              out.jobId = jobId;
+              out.original = pollErr;
+              logApiError(`${pollEndpointBase}/${jobId}`, out);
+              throw out;
+            }
+          } catch (e) {
+            // ignore detection errors
+          }
+
+          console.warn('Poll error for job', jobId, pollErr?.message || pollErr);
+        }
+        await new Promise((res) => setTimeout(res, interval));
+        interval = Math.min(interval * 2, maxInterval);
+      }
+      throw new Error(`Job polling timed out for job ${jobId}`);
+    };
+
+    // If a previous job for this endpoint was persisted, attempt to resume polling it
+    try {
+      if (resumeFromStorage && typeof window !== 'undefined' && shouldPersist) {
+        const raw = window.localStorage.getItem(storageKey);
+        if (raw) {
+          try {
+            const saved = JSON.parse(raw);
+            if (saved && saved.jobId) {
+              // Try to poll the saved job id before creating a new job
+              try {
+                const resumed = await pollLoop(saved.jobId);
+                return resumed;
+              } catch (resumeErr) {
+                // If resume fails, remove persisted marker and continue to create a new job
+                try { window.localStorage.removeItem(storageKey); } catch (e) {}
+                console.warn('Resuming persisted job failed, creating a new job', resumeErr);
+              }
+            }
+          } catch (e) {
+            // malformed storage; remove it
+            try { window.localStorage.removeItem(storageKey); } catch (e2) {}
+          }
+        }
+      }
+    } catch (e) {
+      // Non-fatal; continue to create a new job
+    }
+
     try {
       createResp = await api.post(jobEndpoint, payload, {
         timeout: Math.min(10_000, totalTimeout),
@@ -310,6 +434,21 @@ async function createJobAndPoll(jobEndpoint, pollEndpointBase, payload, totalTim
         const cancelErr = new Error('Request canceled');
         cancelErr.name = 'AbortError';
         throw cancelErr;
+      }
+
+      // Detect socket-level resets / proxy hangups and mark them so callers
+      // can choose an immediate fallback flow instead of retrying the job.
+      try {
+        const msg = String(err?.message || '').toLowerCase();
+        if (err && (err.code === 'ECONNRESET' || msg.includes('socket hang up') || msg.includes('connection reset'))) {
+          const out = new Error('Socket hang up / connection reset when contacting job endpoint');
+          out.isSocketHangUp = true;
+          out.original = err;
+          logApiError(jobEndpoint, out);
+          throw out;
+        }
+      } catch (e) {
+        // ignore detection errors
       }
 
       // If the backend explicitly returned 503 with a Redis-required message,
@@ -329,47 +468,19 @@ async function createJobAndPoll(jobEndpoint, pollEndpointBase, payload, totalTim
 
     if (createResp.status === 202 && createResp.data?.job_id) {
       const jobId = createResp.data.job_id;
-      const start = Date.now();
-      // Keep polling interval short (1s) with gentle exponential backoff but
-      // cap to 2000ms to respect real-time UX while being polite to the server.
-      let interval = 1000; // 1s initial
-      const maxInterval = 2000; // cap at 2s
-      const maxDuration = Math.min(totalTimeout, 60_000); // do not poll longer than 60s by default
 
-      while (Date.now() - start < maxDuration) {
-        try {
-          // Stop if caller aborted the signal
-          if (signal && signal.aborted) {
-            const cancelErr = new Error('Request canceled');
-            cancelErr.name = 'AbortError';
-            throw cancelErr;
-          }
-
-          const remaining = Math.max(1000, maxDuration - (Date.now() - start));
-          const statusResp = await api.get(`${pollEndpointBase}/${jobId}`, { timeout: Math.min(10_000, remaining), validateStatus: (s) => s < 500, signal });
-          const data = statusResp.data || {};
-          const status = data.status;
-          if (status === 'completed') {
-            // Normalize result shape
-            return data.result || data;
-          }
-          if (status === 'failed') {
-            throw new Error(data.error || 'Job failed');
-          }
-        } catch (pollErr) {
-          // Cancellation should propagate
-          if (pollErr && (pollErr.name === 'AbortError' || pollErr.code === 'ERR_CANCELED')) {
-            throw pollErr;
-          }
-          // Ignore transient poll errors but log for visibility
-          console.warn('Poll error for job', createResp.data?.job_id, pollErr?.message || pollErr);
+      // Persist job id so polling can resume after reloads/crashes
+      try {
+        if (shouldPersist && typeof window !== 'undefined') {
+          const payloadToStore = { jobId, endpoint: pollEndpointBase, createdAt: Date.now() };
+          window.localStorage.setItem(storageKey, JSON.stringify(payloadToStore));
         }
-        // Wait before next poll (bounded exponential backoff)
-        await new Promise((res) => setTimeout(res, interval));
-        interval = Math.min(interval * 2, maxInterval);
+      } catch (e) {
+        // ignore storage errors
       }
 
-      throw new Error('Job polling timed out');
+      // Poll the job using shared loop
+      return await pollLoop(jobId);
     }
 
     // If server returned 200 with immediate result, return it
@@ -519,97 +630,62 @@ export const getQuestions = async (params, options = {}) => {
   }
 };
 
-export const submitAnswer = async (data) => {
-  const maxAttempts = 2;
-  let attempt = 0;
-  let lastError = null;
-  let timeout = REQUEST_TIMEOUTS.interviewAnalysis;
+export const submitAnswer = async (data, options = {}) => {
+  // Prefer job-based analysis to avoid blocking synchronous requests and to
+  // make long-running provider calls robust against request timeouts.
+  try {
+    const result = await createJobAndPoll('/api/interview/analyze-answer-job', '/api/interview/job', data, REQUEST_TIMEOUTS.interviewAnalysis * 2, { signal: options.signal, maxPollDuration: REQUEST_TIMEOUTS.interviewAnalysis * 2 });
+    return result;
+  } catch (jobErr) {
+    // If Redis is required but not configured, surface actionable message
+    if (jobErr && jobErr.isRedisRequired) {
+      logApiError('/api/interview/analyze-answer-job', jobErr);
+      return { error: 'Background jobs unavailable', details: jobErr.message || 'Server requires Redis to process analysis jobs.' };
+    }
 
-  while (attempt < maxAttempts) {
+    // If the job failure was caused by a socket/proxy reset, log and attempt an
+    // immediate synchronous fallback with an extended timeout. This is a
+    // pragmatic mitigation against hosting proxies that abruptly close long
+    // connections (e.g., Render/Vercel reverse proxy timeouts).
+    const fallbackTimeout = jobErr && jobErr.isSocketHangUp ? Math.max(REQUEST_TIMEOUTS.interviewAnalysis * 2, 120_000) : REQUEST_TIMEOUTS.interviewAnalysis * 2;
+
+    logApiError('/api/interview/analyze-answer-job', jobErr || new Error('Job creation/polling failed'));
+
+    // Attempt synchronous fallback (best-effort) with a single retry on timeout
     try {
-      const response = await api.post('/api/interview/analyze-answer', data, { timeout });
-      return response.data;
-    } catch (error) {
-      lastError = error;
-      // If timeout, attempt an exponential backoff retry once with a longer timeout
-      const isTimeout = error?.code === 'ECONNABORTED' || error?.message?.toLowerCase?.().includes('timeout');
+      const response = await api.post('/api/interview/analyze-answer', data, { timeout: fallbackTimeout, validateStatus: (s) => s < 500, signal: options.signal });
+      if (response.status === 200) return response.data;
+      // If it returned 202 with a job_id, poll that job as well
+      if (response.status === 202 && response.data?.job_id) {
+        const jobId = response.data.job_id;
+        const pollResult = await createJobAndPoll('/api/interview/analyze-answer-job', '/api/interview/job', data, REQUEST_TIMEOUTS.interviewAnalysis * 2, { signal: options.signal, maxPollDuration: REQUEST_TIMEOUTS.interviewAnalysis * 2 });
+        return pollResult;
+      }
+    } catch (syncErr) {
+      // If aborted, rethrow
+      if (syncErr && (syncErr.name === 'AbortError' || syncErr.code === 'ERR_CANCELED')) throw syncErr;
+      logApiError('/api/interview/analyze-answer (fallback)', syncErr || new Error('Fallback failed'));
+
+      const isTimeout = syncErr?.code === 'ECONNABORTED' || syncErr?.message?.toLowerCase?.().includes('timeout');
       if (isTimeout) {
-        attempt += 1;
-        console.warn(`submitAnswer attempt ${attempt} timed out (timeout=${timeout}ms).`);
-        if (attempt < maxAttempts) {
-          // Wait with exponential backoff before retrying
-          const backoffMs = 1000 * Math.pow(2, attempt - 1);
-          await new Promise((res) => setTimeout(res, backoffMs));
-          // Increase timeout for retry but cap at 120s
-          timeout = Math.min(timeout * 2, 120_000);
-          continue;
-        }
-
-        console.error('submitAnswer API timeout after retry:', error?.message || error);
-        return {
-          error: 'Analysis timed out',
-          details: 'The analysis service is taking too long. Try again later or shorten the response.',
-        };
+        return { error: 'Analysis timed out', details: 'The analysis service is taking too long. Try again later or shorten the response.' };
       }
 
-      // Non-timeout errors — break and handle below
-      break;
-    }
-  }
-
-  // If we reach here, handle the last non-timeout error and provide a
-  // stable, predictable error payload for callers (avoid throwing raw AxiosError)
-  const error = lastError;
-  let errorPayload = error?.response?.data;
-
-  // Use the centralized logger which redacts sensitive headers and serializes
-  // nicely for TurboPack/DevTools.
-  logApiError('/api/interview/analyze-answer', error || new Error('Unknown error'));
-
-  // If the server provided a string body, try to parse JSON out of it so
-  // callers can rely on structured fields when available.
-  if (typeof errorPayload === 'string') {
-    try {
-      const parsed = JSON.parse(errorPayload);
-      if (parsed && typeof parsed === 'object') {
-        return parsed;
+      const status = syncErr?.response?.status;
+      if (status && status >= 500) {
+        return { error: 'Server error', details: syncErr?.message || 'The analysis service encountered an internal error.' , status };
       }
-      // If parsing succeeded but didn't return an object, fall through
-    } catch (e) {
-      // Not JSON — continue to build a structured error below
+
+      if (!syncErr?.response) {
+        return { error: 'Failed to reach analysis service', details: syncErr?.message || 'Network error' };
+      }
+
+      return { error: syncErr?.response?.data?.error || 'Request failed', details: syncErr?.response?.data?.details || syncErr?.message || 'Request failed', status: status || null };
     }
-  }
 
-  // If the server returned a structured payload (for example validation errors
-  // or a typed error object), return it directly so the UI can show relevant
-  // messages to the user.
-  if (errorPayload && typeof errorPayload === 'object') {
-    return errorPayload;
+    // As a last resort, return a generic failure
+    return { error: 'Analysis failed', details: jobErr?.message || 'Background job and fallback both failed' };
   }
-
-  // Map common failure modes to friendly payloads that the UI expects.
-  const status = error?.response?.status;
-  if (status && status >= 500) {
-    return {
-      error: 'Server error',
-      details: error?.message || 'The analysis service encountered an internal error. Check server logs.',
-      status,
-    };
-  }
-
-  if (!error?.response) {
-    return {
-      error: 'Failed to connect to analysis service',
-      details: error?.message || 'Unable to reach the interview analysis service.',
-    };
-  }
-
-  // For other client or auth errors, return a normalized payload.
-  return {
-    error: error?.response?.data?.error || 'Request failed',
-    details: error?.response?.data?.details || error?.message || 'Request failed with an unexpected error.',
-    status: status || null,
-  };
 };
 
 export const getFeedback = async (sessionId) => {

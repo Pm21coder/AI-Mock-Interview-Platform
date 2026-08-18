@@ -154,6 +154,21 @@ def create_app(config_class=Config):
     # Register Socket.IO event handlers for real-time dashboard updates.
     register_socket_handlers()
 
+    # Log Gemini service diagnostics at startup to aid debugging in CI/dev environments.
+    try:
+        from app.services.gemini_service import GeminiService
+        try:
+            svc = GeminiService()
+            try:
+                status = svc.get_status()
+            except Exception:
+                status = {'available': False}
+            app.logger.info('Gemini startup status: %s', status)
+        except Exception as init_exc:
+            app.logger.exception('Failed to initialize GeminiService at startup: %s', init_exc)
+    except Exception:
+        app.logger.debug('GeminiService not importable at startup; continuing')
+
     @app.route('/health')
     def health():
         # Report which Gemini client is active for diagnostics
