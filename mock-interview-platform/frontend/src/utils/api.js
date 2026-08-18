@@ -632,8 +632,8 @@ export const getQuestions = async (params, options = {}) => {
 };
 
 export const submitAnswer = async (data, options = {}) => {
-  // Use synchronous analysis endpoint directly (no Redis/RQ or polling).
-  // Implement small retry/backoff to handle transient provider/backend issues.
+  // Use the server-side LLM proxy at /api/interview for answer analysis.
+  // Keep the existing retry/backoff behavior and friendly error mappings.
   const maxAttempts = 2;
   let attempt = 0;
   let lastError = null;
@@ -642,25 +642,28 @@ export const submitAnswer = async (data, options = {}) => {
   while (attempt < maxAttempts) {
     attempt += 1;
     try {
-      const response = await api.post('/api/interview/analyze-answer', data, {
+      const payload = {
+        action: 'analyze_answer',
+        prompt: data?.answer || data?.transcript || data?.text || '',
+        params: data,
+      };
+
+      const response = await api.post('/api/interview', payload, {
         timeout,
         validateStatus: (s) => s < 500,
         signal: options.signal,
       });
 
-      // Expect 200 with analysis result. If server returns 202 with job_id, the
-      // backend still intends async processing; treat that as an error because
-      // we're removing job/polling from the client. Surface a clear message.
+      // If server returns an async job flow, surface that clearly
       if (response.status === 200) return response.data;
       if (response.status === 202 && response.data?.job_id) {
-        // Server is returning job-based flow; log it and return a helpful error
         const out = new Error('Server returned job-based response but client is configured for synchronous analysis. Configure server for direct analysis or enable background workers.');
         out.status = 202;
         out.job_id = response.data.job_id;
         throw out;
       }
 
-      lastError = new Error('Unexpected response from analyze-answer');
+      lastError = new Error('Unexpected response from analysis endpoint');
       break;
     } catch (err) {
       lastError = err;
@@ -681,7 +684,7 @@ export const submitAnswer = async (data, options = {}) => {
       }
 
       // Non-retriable or final failure: log structured error and map to friendly object
-      logApiError('/api/interview/analyze-answer', err);
+      logApiError('/api/interview (analyze_answer)', err);
 
       // Map common cases to structured responses callers can use
       if (isTimeout) {
@@ -699,7 +702,7 @@ export const submitAnswer = async (data, options = {}) => {
   }
 
   // If we exit loop, return the last error mapped
-  logApiError('/api/interview/analyze-answer', lastError || new Error('Unknown error'));
+  logApiError('/api/interview (analyze_answer)', lastError || new Error('Unknown error'));
   return { error: 'Analysis failed', details: lastError?.message || 'Unknown error' };
 };
 
@@ -792,19 +795,11 @@ export const getDashboardStats = async (options = { forceRefresh: false }) => {
     // TurboPack and some devtools may show Error objects as "{}" because
     // properties are non-enumerable. Stringify the plain object so the
     // diagnostic is visible in all consoles (and avoid leaking auth headers).
-    try {
-      console.error('getDashboardStats error:', JSON.stringify(errorDetails, null, 2));
-    } catch (e) {
-      // Fallback to raw object if stringification fails for any reason.
-      console.error('getDashboardStats error (unserializable):', errorDetails);
-    }
+    // Avoid JSON.stringify which can throw on circular objects; log structured object instead.
+    console.error('getDashboardStats error:', errorDetails);
 
     if (serializedError) {
-      try {
-        console.debug('getDashboardStats Axios error:', JSON.stringify(serializedError, null, 2));
-      } catch (e) {
-        console.debug('getDashboardStats Axios error (unserializable):', serializedError);
-      }
+      console.debug('getDashboardStats Axios error:', serializedError);
     }
     
     if (!error?.response) {
@@ -1003,16 +998,26 @@ export const hasFeatureAccess = async (featureName) => {
   return response.data.has_access;
 };
 
-// Gemini-powered interview API functions (via Next.js API routes)
-export const generateInterviewQuestions = async (role, category, difficulty) => {
+// Interview API functions - use server-side LLM proxy at /api/interview
+export const generateInterviewQuestions = async (role, category, difficulty, num_questions = 3) => {
   try {
-    const response = await axios.post('/api/interview/questions', {
-      role,
-      category,
-      difficulty,
-    });
+    // Build a clear instruction prompt and pass structured params. The server-side proxy
+    // will forward this to the configured LLM (DeepSeek) using server env vars.
+    const prompt = `Generate ${num_questions} interview questions` +
+      (category ? ` in the category '${category}'` : '') +
+      (difficulty ? ` with difficulty '${difficulty}'` : '') +
+      (role ? ` for the role '${role}'.` : '.') +
+      ` For each question include a short expected answer sketch.`;
+
+    const response = await api.post('/api/interview', {
+      action: 'generate_questions',
+      prompt,
+      params: { role, category, difficulty, num_questions },
+    }, { timeout: REQUEST_TIMEOUTS.interviewQuestions });
+
     return response.data;
   } catch (error) {
+    logApiError('/api/interview (generate_questions)', error);
     const message = error.response?.data?.error || error.message || 'Failed to generate questions';
     throw new Error(message);
   }
@@ -1020,12 +1025,19 @@ export const generateInterviewQuestions = async (role, category, difficulty) => 
 
 export const generateFeedback = async (role, qaPairs) => {
   try {
-    const response = await axios.post('/api/interview/feedback', {
-      role,
-      qaPairs,
-    });
+    // Provide instruction plus structured data. Keep payload concise to avoid
+    // very large JSON bodies — server proxy will forward params to the LLM.
+    const prompt = `You are an expert interview coach. Provide concise feedback for each question-answer pair and an overall summary for the role '${role || 'candidate'}'.`;
+
+    const response = await api.post('/api/interview', {
+      action: 'analyze_qa_pairs',
+      prompt,
+      params: { role, qaPairs },
+    }, { timeout: REQUEST_TIMEOUTS.interviewAnalysis });
+
     return response.data;
   } catch (error) {
+    logApiError('/api/interview (analyze_qa_pairs)', error);
     const message = error.response?.data?.error || error.message || 'Failed to generate feedback';
     throw new Error(message);
   }

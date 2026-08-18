@@ -70,13 +70,6 @@ function extractTextFromLLMResponse(json: any): string | null {
 }
 
 export async function POST(req: Request) {
-  if (!LLM_API_URL || !LLM_API_KEY) {
-    return NextResponse.json(
-      { error: "LLM_API_URL and LLM_API_KEY are required server-side environment variables." },
-      { status: 500 }
-    );
-  }
-
   let body: any;
   try {
     body = await req.json();
@@ -89,6 +82,39 @@ export async function POST(req: Request) {
   // Basic validation
   if (!prompt && !body.input) {
     return NextResponse.json({ error: "Missing 'prompt' or 'input' in request body." }, { status: 400 });
+  }
+
+  // If no LLM configured, fallback to the backend API (Flask) using NEXT_PUBLIC_API_URL
+  if (!LLM_API_URL || !LLM_API_KEY) {
+    const backendBase = process.env.NEXT_PUBLIC_API_URL || process.env.BACKEND_API_URL || 'http://localhost:5000';
+    // Map actions to backend endpoints
+    const actionMap: Record<string, string> = {
+      generate_questions: '/api/interview/generate-questions',
+      analyze_qa_pairs: '/api/interview/analyze-answer',
+      analyze_answer: '/api/interview/analyze-answer',
+      default: '/api/interview/analyze-answer',
+    };
+
+    const targetPath = action && actionMap[action] ? actionMap[action] : actionMap['default'];
+    const targetUrl = backendBase.replace(/\/$/, '') + targetPath;
+
+    try {
+      const forwardRes = await fetchWithTimeout(targetUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ ...(params || {}), prompt, input: body.input }),
+      }, DEFAULT_TIMEOUT);
+
+      const text = await forwardRes.text();
+      const parsed = safeJsonParse(text);
+      return NextResponse.json(parsed, { status: forwardRes.status });
+    } catch (err: any) {
+      const isAbort = err && (err.name === 'AbortError' || err.type === 'aborted');
+      const message = isAbort ? `Upstream request timed out after ${DEFAULT_TIMEOUT}ms` : (err.message || String(err));
+      return NextResponse.json({ ok: false, error: message }, { status: 502 });
+    }
   }
 
   // Build provider payload. This is a reasonable DeepSeek/OpenAI-compatible default.

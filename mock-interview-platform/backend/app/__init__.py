@@ -10,6 +10,11 @@ from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 
 from app.config import Config
+# Ensure requests Authorization injector is applied early so generic LLM calls receive configured keys
+try:
+    from app.services import requests_injector  # monkey-patches requests.post if available
+except Exception:
+    pass
 
 mongo = PyMongo()
 socketio = SocketIO()
