@@ -495,9 +495,23 @@ export const getDashboardStats = async (options = { forceRefresh: false }) => {
       method: error?.config?.method,
       url: error?.config?.url,
     };
-    console.error('getDashboardStats error:', errorDetails);
+
+    // TurboPack and some devtools may show Error objects as "{}" because
+    // properties are non-enumerable. Stringify the plain object so the
+    // diagnostic is visible in all consoles (and avoid leaking auth headers).
+    try {
+      console.error('getDashboardStats error:', JSON.stringify(errorDetails, null, 2));
+    } catch (e) {
+      // Fallback to raw object if stringification fails for any reason.
+      console.error('getDashboardStats error (unserializable):', errorDetails);
+    }
+
     if (serializedError) {
-      console.debug('getDashboardStats Axios error:', serializedError);
+      try {
+        console.debug('getDashboardStats Axios error:', JSON.stringify(serializedError, null, 2));
+      } catch (e) {
+        console.debug('getDashboardStats Axios error (unserializable):', serializedError);
+      }
     }
     
     if (!error?.response) {
