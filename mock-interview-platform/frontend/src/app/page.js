@@ -162,8 +162,7 @@ export default function Home() {
                         alt="Interview coaching session"
                         width={400}
                         height={260}
-                        priority={false}
-                        loading="lazy"
+                        priority
                         className="h-auto w-full rounded-[1.2rem] object-cover"
                       />
                       <div className="absolute inset-0 bg-gradient-to-tr from-blue-600/35 via-indigo-500/10 to-transparent" />

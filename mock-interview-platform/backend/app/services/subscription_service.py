@@ -67,6 +67,12 @@ class SubscriptionService:
         """Initialize the subscription service."""
         self.config_tiers = Config.SUBSCRIPTION_TIERS
         self.razorpay_amounts = Config.RAZORPAY_ORDER_AMOUNTS
+        # In-memory short-lived cache for subscription status to reduce DB/third-party
+        # lookups under high load and improve responsiveness for frequent checks.
+        # This cache is intentionally short-lived to avoid serving stale quota data
+        # for users actively taking interviews.
+        self._status_cache = {}
+        self._status_cache_ttl_seconds = getattr(Config, 'SUBSCRIPTION_STATUS_CACHE_TTL', 5)
 
     # ========================
     # Core Subscription Methods
@@ -82,6 +88,17 @@ class SubscriptionService:
         Returns:
             dict: Subscription details with tier, status, usage, features
         """
+        # Fast-path: return cached subscription if it exists and is fresh.
+        try:
+            cached = self._status_cache.get(str(user_id))
+            if cached:
+                ts, data = cached
+                if (datetime.utcnow() - ts).total_seconds() < self._status_cache_ttl_seconds:
+                    return data
+        except Exception:
+            # If cache access fails for any reason, continue to compute live.
+            pass
+
         user = None
         if is_mongo_available():
             try:
@@ -135,19 +152,26 @@ class SubscriptionService:
             else 'unlimited'
         )
 
-        return {
-            'tier': tier,
-            'status': status,
-            'interviews_used_this_month': interviews_used,
-            'interviews_remaining': interviews_remaining,
-            'monthly_limit': monthly_limit if monthly_limit is not None else 'unlimited',
-            'features': plan_info['features'],
-            'subscription_start_date': start_date,
-            'subscription_end_date': end_date,
-            'plan_info': plan_info,
-            'is_trial': user.get('is_trial', False),
-            'trial_days_remaining': self._get_trial_days_remaining(user),
+        result = {
+           'tier': tier,
+           'status': status,
+           'interviews_used_this_month': interviews_used,
+           'interviews_remaining': interviews_remaining,
+           'monthly_limit': monthly_limit if monthly_limit is not None else 'unlimited',
+           'features': plan_info['features'],
+           'subscription_start_date': start_date,
+           'subscription_end_date': end_date,
+           'plan_info': plan_info,
+           'is_trial': user.get('is_trial', False),
+           'trial_days_remaining': self._get_trial_days_remaining(user),
         }
+        # Cache the computed subscription status for a short period to reduce
+        # repeated DB reads from synchronous dashboard requests.
+        try:
+           self._status_cache[str(user_id)] = (datetime.utcnow(), result)
+        except Exception:
+           pass
+        return result
 
     def create_subscription(self, user_id, tier, razorpay_order_id=None,
                           razorpay_payment_id=None, is_trial=False):

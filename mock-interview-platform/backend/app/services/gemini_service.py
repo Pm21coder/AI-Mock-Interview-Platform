@@ -178,6 +178,28 @@ class GeminiService:
                 last_error = exc
                 # record last error for diagnostic use
                 self.last_error = str(exc)
+
+                # Detect common transient server-side errors (e.g., 503 Service Unavailable)
+                exc_str = str(exc).upper() if exc is not None else ''
+                status_code = None
+                # Try common attributes used by HTTP client libraries
+                try:
+                    status_code = getattr(exc, 'status_code', None) or getattr(exc, 'code', None)
+                except Exception:
+                    status_code = None
+                # Some SDK exceptions include a response object with a status_code
+                try:
+                    status_code = status_code or getattr(getattr(exc, 'response', None), 'status_code', None)
+                except Exception:
+                    pass
+
+                if status_code == 503 or '503' in exc_str or 'UNAVAILABLE' in exc_str or 'SERVICE UNAVAILABLE' in exc_str:
+                    # Skip this model quickly and try the next candidate without further local retries
+                    logger.warning('GeminiService._generate_json: detected 503/UNAVAILABLE for model %s; skipping to next candidate', model_name)
+                    if not self.use_new_sdk:
+                        self.model = None
+                    continue
+
                 if not self.use_new_sdk:
                     self.model = None  # Reset model on failure to try next one
                 continue

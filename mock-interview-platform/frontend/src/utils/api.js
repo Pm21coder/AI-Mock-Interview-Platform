@@ -14,7 +14,8 @@ const REQUEST_TIMEOUTS = {
   resumeAnalysis: 20_000, // increased from 10s to tolerate backend cold-starts
   resumeHistory: 20_000, // increased from 10s
   // Subscription status can occasionally be slow during billing calls
-  subscriptionStatus: 15_000, // increased from 8s
+  // Increase client timeout to 30s to tolerate backend processing (billing lookups, Stripe checks)
+  subscriptionStatus: 30_000, // increased from 15s -> 30s
   // Increase dashboard and question-category lookups timeout to be tolerant of
   // cold starts and occasional backend latency (e.g., pre-warming, DB rebuilds).
   questionCategories: 30_000,
@@ -869,10 +870,32 @@ export const getResumeHistory = async () => {
 
 // Subscription API functions
 export const getSubscriptionStatus = async () => {
+  const cacheKey = getCacheKey('GET', '/api/subscription/status');
+  const cached = getCachedData(cacheKey);
+
+  // Stale-while-revalidate: return cached data immediately if present,
+  // and refresh the cache in the background so subsequent calls get fresh data.
+  if (cached) {
+    // Kick off background revalidation but do not await it here.
+    (async () => {
+      try {
+        const resp = await api.get('/api/subscription/status', { timeout: REQUEST_TIMEOUTS.subscriptionStatus });
+        setCachedData(cacheKey, resp.data, CACHE_TTL.default);
+      } catch (err) {
+        // Only log; preserve current cached value for callers.
+        logApiError('/api/subscription/status (revalidate)', err);
+      }
+    })();
+
+    return cached;
+  }
+
+  // No cached value: fetch normally and cache result for a short duration
   try {
     const response = await api.get('/api/subscription/status', {
       timeout: REQUEST_TIMEOUTS.subscriptionStatus,
     });
+    try { setCachedData(cacheKey, response.data, CACHE_TTL.default); } catch (e) { /* ignore cache write failures */ }
     return response.data;
   } catch (error) {
     logApiError('/api/subscription/status', error);
