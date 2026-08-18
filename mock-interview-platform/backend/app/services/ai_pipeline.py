@@ -12,6 +12,13 @@ try:
 except Exception:
     _HAS_OPENAI = False
 
+# If a generic HTTP LLM provider is to be used (e.g., Deepseek), we'll use requests
+try:
+    import requests
+    _HAS_REQUESTS = True
+except Exception:
+    _HAS_REQUESTS = False
+
 try:
     # DeepFace is optional on servers; we handle absence gracefully
     from deepface import DeepFace
@@ -37,8 +44,16 @@ class AnswerGenerator:
         self.model = model_name or getattr(Config, 'OPENAI_MODEL', 'gpt-3.5-turbo')
 
     def generate_answer(self, question, max_tokens=300):
+        # If OpenAI SDK is available and an API key is configured, use it
         if _HAS_OPENAI:
             try:
+                # Ensure API key is set from Config if provided
+                try:
+                    if getattr(Config, 'OPENAI_API_KEY', ''):
+                        openai.api_key = Config.OPENAI_API_KEY
+                except Exception:
+                    pass
+
                 resp = openai.ChatCompletion.create(
                     model=self.model,
                     messages=[{"role": "user", "content": f"Provide a concise, professional answer to the interview question:\n\n{question}"}],
@@ -48,7 +63,32 @@ class AnswerGenerator:
                 content = resp['choices'][0]['message']['content'].strip()
                 return content
             except Exception as exc:
-                logger.exception('OpenAI generation failed, falling back to template: %s', exc)
+                logger.exception('OpenAI generation failed, falling back to alternative provider/template: %s', exc)
+
+        # If a generic HTTP LLM provider is configured (LLM_API_KEY + LLM_API_URL), call it
+        if _HAS_REQUESTS and getattr(Config, 'LLM_API_KEY', '') and getattr(Config, 'LLM_API_URL', ''):
+            try:
+                headers = {
+                    'Authorization': f"Bearer {Config.LLM_API_KEY}",
+                    'Content-Type': 'application/json',
+                }
+                payload = {
+                    'prompt': f"Provide a concise, professional answer to the interview question:\n\n{question}",
+                    'max_tokens': max_tokens,
+                    'temperature': 0.6,
+                }
+                r = requests.post(Config.LLM_API_URL, json=payload, headers=headers, timeout=15)
+                r.raise_for_status()
+                data = r.json()
+                # Try common response shapes
+                for key in ('text', 'answer', 'output', 'result'):
+                    if isinstance(data, dict) and key in data and isinstance(data[key], str):
+                        return data[key].strip()
+                # If provider returns list or other shape, try to find a string
+                if isinstance(data, list) and len(data) and isinstance(data[0], str):
+                    return data[0].strip()
+            except Exception as exc:
+                logger.exception('Generic LLM provider failed: %s', exc)
 
         # Fallback deterministic template
         template = (
@@ -76,8 +116,15 @@ class AnswerAnalyzer:
         sim = self._semantic_similarity(user_answer or '', model_answer or '')
 
         feedback_text = None
+        # Prefer OpenAI if available
         if _HAS_OPENAI:
             try:
+                try:
+                    if getattr(Config, 'OPENAI_API_KEY', ''):
+                        openai.api_key = Config.OPENAI_API_KEY
+                except Exception:
+                    pass
+
                 prompt = (
                     f"You are an expert interview coach.\nQuestion: {question}\nModel Answer: {model_answer}\n"
                     f"Candidate Answer: {user_answer}\nProvide concise constructive feedback under 150 words, focusing on content relevance, structure, and improvement suggestions."
@@ -92,10 +139,37 @@ class AnswerAnalyzer:
             except Exception as exc:
                 logger.exception('OpenAI feedback generation failed: %s', exc)
 
+        # If not available, try generic HTTP provider
+        if not feedback_text and _HAS_REQUESTS and getattr(Config, 'LLM_API_KEY', '') and getattr(Config, 'LLM_API_URL', ''):
+            try:
+                headers = {
+                    'Authorization': f"Bearer {Config.LLM_API_KEY}",
+                    'Content-Type': 'application/json',
+                }
+                payload = {
+                    'prompt': (
+                        f"You are an expert interview coach.\nQuestion: {question}\nModel Answer: {model_answer}\n"
+                        f"Candidate Answer: {user_answer}\nProvide concise constructive feedback under 150 words, focusing on content relevance, structure, and improvement suggestions."
+                    ),
+                    'max_tokens': 200,
+                    'temperature': 0.2,
+                }
+                r = requests.post(Config.LLM_API_URL, json=payload, headers=headers, timeout=15)
+                r.raise_for_status()
+                data = r.json()
+                for key in ('text', 'answer', 'output', 'result'):
+                    if isinstance(data, dict) and key in data and isinstance(data[key], str):
+                        feedback_text = data[key].strip()
+                        break
+                if not feedback_text and isinstance(data, list) and len(data) and isinstance(data[0], str):
+                    feedback_text = data[0].strip()
+            except Exception as exc:
+                logger.exception('Generic LLM feedback provider failed: %s', exc)
+
         if not feedback_text:
             # Deterministic fallback feedback
             feedback_text = (
-                "Feedback: Could not generate LLM feedback (no OpenAI).\n"
+                "Feedback: Could not generate LLM feedback (no provider configured).\n"
                 "Check that your answer covers the question, is structured (Situation, Task, Action, Result) and includes specific outcomes."
             )
 

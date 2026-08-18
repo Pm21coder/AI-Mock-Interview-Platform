@@ -12,14 +12,14 @@
   },
   "new_cycle@example.com": {
     "email": "new_cycle@example.com",
-    "password_hash": "$2b$12$4bLKVsE6itzVjAprihG/KeksGM8ivNKxeRdJftzlgUJwispiOi0ga",
-    "created_at": "2026-08-18 18:57:47.874253",
+    "password_hash": "$2b$12$Hldalq2PaPEjTkio/eBNWe.PDeV1.Gu317ZeNPN2BBURGLBmn6Mgy",
+    "created_at": "2026-08-18 19:09:08.129456",
     "subscription_tier": "free",
     "subscription_status": "active",
-    "subscription_start_date": "2026-08-18 18:57:47.874253",
-    "subscription_end_date": "2026-09-17 18:57:47.874253",
+    "subscription_start_date": "2026-08-18 19:09:08.129456",
+    "subscription_end_date": "2026-09-17 19:09:08.129456",
     "interviews_used_this_month": 0,
-    "_id": "demo_54054898-cf60-4a93-bcdd-74d1bcc98a47"
+    "_id": "demo_1841ddcf-2ba1-46a2-877b-7b190e84b05a"
   },
   "e2e-test+1@example.com": {
     "email": "e2e-test+1@example.com",

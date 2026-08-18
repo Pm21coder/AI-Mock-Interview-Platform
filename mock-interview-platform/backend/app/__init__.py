@@ -186,6 +186,17 @@ def create_app(config_class=Config):
     except Exception:
         app.logger.debug('GeminiService not importable at startup; continuing')
 
+    # Log which LLM provider (if any) is configured for the AI pipeline. Do NOT log keys.
+    try:
+        provider = 'none'
+        if getattr(Config, 'OPENAI_API_KEY', ''):
+            provider = 'openai'
+        elif getattr(Config, 'LLM_API_KEY', '') and getattr(Config, 'LLM_API_URL', ''):
+            provider = getattr(Config, 'LLM_PROVIDER', 'generic-http') or 'generic-http'
+        app.logger.info('LLM provider configured: %s', provider)
+    except Exception:
+        app.logger.debug('Failed to determine LLM provider configuration')
+
     @app.route('/health')
     def health():
         # Report which Gemini client is active for diagnostics

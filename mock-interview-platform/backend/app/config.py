@@ -179,3 +179,11 @@ class Config:
         'pro': 75000,
     }
 
+    # Optional LLM provider configuration (OpenAI or a generic HTTP LLM provider)
+    OPENAI_API_KEY = os.getenv('OPENAI_API_KEY', '')
+    # Generic provider: set LLM_API_KEY and LLM_API_URL to enable HTTP-based LLMs
+    LLM_API_KEY = os.getenv('LLM_API_KEY', '')
+    LLM_API_URL = os.getenv('LLM_API_URL', '')
+    # Optionally hint at provider name (e.g., 'deepseek') for logging/metrics
+    LLM_PROVIDER = os.getenv('LLM_PROVIDER', '')
+
