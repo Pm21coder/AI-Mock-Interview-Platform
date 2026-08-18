@@ -32,7 +32,29 @@ function responseBodyForLog(error) {
   return body;
 }
 
+// Simple throttle to avoid spamming the console with repeated identical
+// API error dumps during transient backend issues. Keyed by endpoint + status.
+const API_LOG_THROTTLE_TTL = 30_000; // 30 seconds
+const _apiLogLast = new Map();
+
 function logApiError(endpoint, error) {
+  // Throttle repeated logs for the same endpoint/status to reduce noise.
+  try {
+    const now = Date.now();
+    const status = error?.response?.status ?? error?.status ?? 'no-status';
+    const throttleKey = `${endpoint}:${status}`;
+    const last = _apiLogLast.get(throttleKey) || 0;
+    if (now - last < API_LOG_THROTTLE_TTL) {
+      // Emit a concise warning only and skip the heavy serialization.
+      console.warn(`API error at ${endpoint} (repeated): ${error?.message || 'See server logs'}`);
+      return;
+    }
+    _apiLogLast.set(throttleKey, now);
+  } catch (e) {
+    // If throttle bookkeeping fails for any reason, continue to log normally.
+    // fall through
+  }
+
   // Build a plain object with enumerable properties so consoles and remote
   // logging systems receive meaningful diagnostics even when Axios stores
   // data on non-enumerable properties.
@@ -79,9 +101,22 @@ function logApiError(endpoint, error) {
   // Print a stable, serialized representation so TurboPack/DevTools show details
   try {
     const out = { endpoint, ...serialized };
-    console.error(`API error at ${endpoint}: ${JSON.stringify(out, null, 2)}`);
-    // Also emit a debug-level object for richer inspection when supported
-    console.debug('API error (debug):', out);
+    const isDev = typeof process !== 'undefined' && process.env && process.env.NODE_ENV !== 'production';
+
+    if (isDev) {
+      // Development: show the full serialized payload for easier debugging
+      console.error(`API error at ${endpoint}: ${JSON.stringify(out, null, 2)}`);
+      // Also emit a debug-level object for richer inspection when supported
+      console.debug('API error (debug):', out);
+    } else {
+      // Production: avoid dumping potentially large or sensitive JSON into the
+      // user's console. Log a concise human-readable message and keep a debug
+      // copy available for tooling that consumes console.debug.
+      console.error(`API error at ${endpoint}: ${serialized.human_readable || serialized.message || 'See server logs'}`);
+      // Non-fatal: still emit a debug-level object when available (won't appear
+      // in many production consoles but can be captured by remote logging).
+      if (console.debug) console.debug('API error (debug):', out);
+    }
   } catch (e) {
     // Fallback if serialization fails for any reason
     console.error('API error (unserializable):', endpoint, serialized, e);
@@ -219,73 +254,124 @@ function parseRedisRequiredMessage(err) {
   return err.response.data?.error || err.response.data?.message || null;
 }
 
-async function createJobAndPoll(jobEndpoint, pollEndpointBase, payload, totalTimeout = REQUEST_TIMEOUTS.interviewQuestions) {
-  // Allow 202 responses without throwing. Wrap create in try/catch so 503 responses
-  // can be detected and surfaced to the UI as a special actionable error.
-  let createResp;
-  try {
-    createResp = await api.post(jobEndpoint, payload, {
-      timeout: Math.min(10_000, totalTimeout),
-      validateStatus: (status) => status < 500,
-    });
-  } catch (err) {
-    // If the backend explicitly returned 503 with a Redis-required message,
-    // attach a flag so the UI can show an actionable admin banner.
-    if (isRedisRequiredError(err)) {
-      logApiError(jobEndpoint, err);
-      const msg = parseRedisRequiredMessage(err) || 'Server requires Redis to process jobs. Set REDIS_URL and run a worker.';
-      const out = new Error(msg);
-      out.isRedisRequired = true;
-      out.status = 503;
-      throw out;
-    }
-
-    // Re-throw other errors so callers can handle timeouts / network issues
-    throw err;
+async function createJobAndPoll(jobEndpoint, pollEndpointBase, payload, totalTimeout = REQUEST_TIMEOUTS.interviewQuestions, options = {}) {
+  // Deduplicate identical concurrent job requests to avoid duplicate work
+  // keying by endpoint + payload JSON. Return the existing promise if one exists.
+  if (!createJobAndPoll._activeRequests) createJobAndPoll._activeRequests = new Map();
+  const dedupeKey = `${jobEndpoint}:${JSON.stringify(payload || {})}`;
+  if (createJobAndPoll._activeRequests.has(dedupeKey)) {
+    return createJobAndPoll._activeRequests.get(dedupeKey);
   }
 
-  if (createResp.status === 202 && createResp.data?.job_id) {
-    const jobId = createResp.data.job_id;
-    const start = Date.now();
-    let interval = 1000; // 1s initial
-    while (Date.now() - start < totalTimeout) {
-      try {
-        const statusResp = await api.get(`${pollEndpointBase}/${jobId}`, { timeout: Math.min(10_000, totalTimeout), validateStatus: (s) => s < 500 });
-        if (statusResp.data?.status === 'completed') {
-          return statusResp.data.result;
-        }
-        if (statusResp.data?.status === 'failed') {
-          throw new Error(statusResp.data?.error || 'Job failed');
-        }
-      } catch (pollErr) {
-        // Ignore transient poll errors but log for visibility
-        console.warn('Poll error for job', jobId, pollErr?.message || pollErr);
+  const controller = options.signal ? null : new AbortController();
+  const signal = options.signal || (controller ? controller.signal : undefined);
+
+  const promise = (async () => {
+    // Allow 202 responses without throwing. Wrap create in try/catch so 503 responses
+    // can be detected and surfaced to the UI as a special actionable error.
+    let createResp;
+    try {
+      createResp = await api.post(jobEndpoint, payload, {
+        timeout: Math.min(10_000, totalTimeout),
+        validateStatus: (status) => status < 500,
+        signal,
+      });
+    } catch (err) {
+      // If aborted by caller, propagate cancellation
+      if (err && (err.name === 'CanceledError' || err.code === 'ERR_CANCELED' || err.message === 'canceled')) {
+        const cancelErr = new Error('Request canceled');
+        cancelErr.name = 'AbortError';
+        throw cancelErr;
       }
-      // Wait before next poll (exponential backoff)
-      await new Promise((res) => setTimeout(res, interval));
-      interval = Math.min(interval * 2, 10_000); // cap 10s
+
+      // If the backend explicitly returned 503 with a Redis-required message,
+      // attach a flag so the UI can show an actionable admin banner.
+      if (isRedisRequiredError(err)) {
+        logApiError(jobEndpoint, err);
+        const msg = parseRedisRequiredMessage(err) || 'Server requires Redis to process jobs. Set REDIS_URL and run a worker.';
+        const out = new Error(msg);
+        out.isRedisRequired = true;
+        out.status = 503;
+        throw out;
+      }
+
+      // Re-throw other errors so callers can handle timeouts / network issues
+      throw err;
     }
 
-    throw new Error('Job polling timed out');
-  }
+    if (createResp.status === 202 && createResp.data?.job_id) {
+      const jobId = createResp.data.job_id;
+      const start = Date.now();
+      // Keep polling interval short (1s) with gentle exponential backoff but
+      // cap to 2000ms to respect real-time UX while being polite to the server.
+      let interval = 1000; // 1s initial
+      const maxInterval = 2000; // cap at 2s
+      const maxDuration = Math.min(totalTimeout, 60_000); // do not poll longer than 60s by default
 
-  // If server returned 200 with immediate result, return it
-  if (createResp.status === 200) return createResp.data;
+      while (Date.now() - start < maxDuration) {
+        try {
+          // Stop if caller aborted the signal
+          if (signal && signal.aborted) {
+            const cancelErr = new Error('Request canceled');
+            cancelErr.name = 'AbortError';
+            throw cancelErr;
+          }
 
-  throw new Error('Failed to create job');
+          const remaining = Math.max(1000, maxDuration - (Date.now() - start));
+          const statusResp = await api.get(`${pollEndpointBase}/${jobId}`, { timeout: Math.min(10_000, remaining), validateStatus: (s) => s < 500, signal });
+          const data = statusResp.data || {};
+          const status = data.status;
+          if (status === 'completed') {
+            // Normalize result shape
+            return data.result || data;
+          }
+          if (status === 'failed') {
+            throw new Error(data.error || 'Job failed');
+          }
+        } catch (pollErr) {
+          // Cancellation should propagate
+          if (pollErr && (pollErr.name === 'AbortError' || pollErr.code === 'ERR_CANCELED')) {
+            throw pollErr;
+          }
+          // Ignore transient poll errors but log for visibility
+          console.warn('Poll error for job', createResp.data?.job_id, pollErr?.message || pollErr);
+        }
+        // Wait before next poll (bounded exponential backoff)
+        await new Promise((res) => setTimeout(res, interval));
+        interval = Math.min(interval * 2, maxInterval);
+      }
+
+      throw new Error('Job polling timed out');
+    }
+
+    // If server returned 200 with immediate result, return it
+    if (createResp.status === 200) return createResp.data;
+
+    throw new Error('Failed to create job');
+  })();
+
+  // Store the promise to dedupe identical concurrent requests
+  createJobAndPoll._activeRequests.set(dedupeKey, promise);
+
+  // Ensure cleanup when promise settles
+  const cleanup = () => createJobAndPoll._activeRequests.delete(dedupeKey);
+  promise.then(cleanup).catch(cleanup);
+
+  return promise;
 }
 
-export const getQuestions = async (params) => {
+export const getQuestions = async (params, options = {}) => {
   try {
     // Prefer job-based generation to avoid HTTP timeouts for long LLM calls
-    const result = await createJobAndPoll('/api/interview/generate-questions-job', '/api/interview/job', params, REQUEST_TIMEOUTS.interviewQuestions);
+    const result = await createJobAndPoll('/api/interview/generate-questions-job', '/api/interview/job', params, REQUEST_TIMEOUTS.interviewQuestions, { signal: options.signal });
     // Normalize result shape if needed
     if (result && result.questions) return result;
     return result;
   } catch (error) {
     logApiError('/api/interview/generate-questions-job', error);
 
-    // Fall back to the original synchronous endpoint with a retry policy
+    // Fall back to the original synchronous endpoint with a retry policy.
+    // Also support the endpoint returning a 202 + job_id (async) by polling it.
     const maxAttempts = 2;
     let attempt = 0;
     let lastError = null;
@@ -293,8 +379,33 @@ export const getQuestions = async (params) => {
 
     while (attempt < maxAttempts) {
       try {
-        const response = await api.post('/api/interview/generate-questions', params, { timeout });
-        return response.data;
+        const response = await api.post('/api/interview/generate-questions', params, { timeout, validateStatus: (s) => s < 500, signal: options.signal });
+        // If server accepted as an async job, delegate to the job poller
+        if (response.status === 202 && response.data?.job_id) {
+          const jobId = response.data.job_id;
+          // Poll the existing job id until completion
+          const start = Date.now();
+          let interval = 1000;
+          const maxInterval = 2000;
+          const maxDuration = Math.min(REQUEST_TIMEOUTS.interviewQuestions, 60_000);
+          while (Date.now() - start < maxDuration) {
+            try {
+              const statusResp = await api.get(`/api/interview/job/${jobId}`, { timeout: Math.min(10_000, maxDuration), validateStatus: (s) => s < 500, signal: options.signal });
+              const d = statusResp.data || {};
+              if (d.status === 'completed') return d.result;
+              if (d.status === 'failed') throw new Error(d.error || 'Job failed');
+            } catch (pollErr) {
+              console.warn('Poll error for job', jobId, pollErr?.message || pollErr);
+            }
+            await new Promise((res) => setTimeout(res, interval));
+            interval = Math.min(interval * 2, maxInterval);
+          }
+          throw new Error('Job polling timed out');
+        }
+        // Otherwise, expect synchronous result
+        if (response.status === 200) return response.data;
+        lastError = new Error('Unexpected response from generate-questions');
+        break;
       } catch (err) {
         lastError = err;
         const isTimeout = err?.code === 'ECONNABORTED' || err?.message?.toLowerCase?.().includes('timeout');
@@ -393,38 +504,58 @@ export const submitAnswer = async (data) => {
     }
   }
 
-  // If we reach here, handle the last non-timeout error similarly to previous behavior
+  // If we reach here, handle the last non-timeout error and provide a
+  // stable, predictable error payload for callers (avoid throwing raw AxiosError)
   const error = lastError;
   let errorPayload = error?.response?.data;
 
-  console.error('submitAnswer API error:', error);
-  if (error?.response) {
-    console.error('submitAnswer server response (raw):', errorPayload);
-  }
+  // Use the centralized logger which redacts sensitive headers and serializes
+  // nicely for TurboPack/DevTools.
+  logApiError('/api/interview/analyze-answer', error || new Error('Unknown error'));
 
-  // If server returned a string payload, try to parse JSON out of it
+  // If the server provided a string body, try to parse JSON out of it so
+  // callers can rely on structured fields when available.
   if (typeof errorPayload === 'string') {
     try {
       const parsed = JSON.parse(errorPayload);
       if (parsed && typeof parsed === 'object') {
         return parsed;
       }
+      // If parsing succeeded but didn't return an object, fall through
     } catch (e) {
-      // Not JSON — fall through and return a structured error
-      return {
-        error: 'Server error',
-        details: errorPayload,
-      };
+      // Not JSON — continue to build a structured error below
     }
   }
 
+  // If the server returned a structured payload (for example validation errors
+  // or a typed error object), return it directly so the UI can show relevant
+  // messages to the user.
   if (errorPayload && typeof errorPayload === 'object') {
     return errorPayload;
   }
 
+  // Map common failure modes to friendly payloads that the UI expects.
+  const status = error?.response?.status;
+  if (status && status >= 500) {
+    return {
+      error: 'Server error',
+      details: error?.message || 'The analysis service encountered an internal error. Check server logs.',
+      status,
+    };
+  }
+
+  if (!error?.response) {
+    return {
+      error: 'Failed to connect to analysis service',
+      details: error?.message || 'Unable to reach the interview analysis service.',
+    };
+  }
+
+  // For other client or auth errors, return a normalized payload.
   return {
-    error: 'Failed to connect to analysis service',
-    details: error?.message || 'Unable to reach the interview analysis service.',
+    error: error?.response?.data?.error || 'Request failed',
+    details: error?.response?.data?.details || error?.message || 'Request failed with an unexpected error.',
+    status: status || null,
   };
 };
 

@@ -59,6 +59,9 @@ jobs_lock = Lock()
 # Job worker functions (must be importable by RQ workers when using Redis)
 def run_generate_questions_job(payload):
     """Background-friendly function that generates questions and returns a job result."""
+    start_time = datetime.utcnow()
+    job_ctx = {'job_payload_summary': {k: payload.get(k) for k in ('job_role', 'category', 'difficulty', 'num_questions')}}
+    logger.info('run_generate_questions_job: started', extra={**job_ctx})
     try:
         job_role = (payload.get('job_role') or '').strip()
         category = (payload.get('category') or 'technical').strip().lower()
@@ -71,17 +74,28 @@ def run_generate_questions_job(payload):
             logger.exception('Gemini generate_questions (job) failed: %s', exc)
             generated = gemini_service.get_fallback_questions(job_role, category, num_questions)
 
-        questions = [
-            InterviewQuestion(
+        # Validate and normalize generated output to prevent malformed payloads
+        questions = []
+        for q in (generated or [])[:num_questions]:
+            if not isinstance(q, dict) or not q.get('question'):
+                logger.warning('Skipping invalid question from LLM', extra={'invalid_item': q})
+                continue
+            questions.append(InterviewQuestion(
                 q.get('question', 'Tell me about your experience'),
                 category,
                 difficulty,
                 q.get('expected_answer', ''),
-            ).to_dict()
-            for q in generated[:num_questions]
-        ]
+            ).to_dict())
+
+        if not questions:
+            error_msg = 'No valid questions produced by LLM; falling back'
+            logger.warning(error_msg, extra={**job_ctx})
+            # Return fallback questions to avoid leaving the job in pending forever
+            questions = gemini_service.get_fallback_questions(job_role, category, num_questions)
 
         result = {'session_id': str(uuid4()), 'questions': questions}
+        duration = (datetime.utcnow() - start_time).total_seconds()
+        logger.info('run_generate_questions_job: completed', extra={'duration_s': duration, **job_ctx})
         return {'status': 'completed', 'result': result}
     except Exception as exc:
         logger.exception('Question generation job failed: %s', exc)
@@ -187,6 +201,61 @@ def generate_questions():
         }), 403
 
     try:
+        # If the client explicitly asked for async handling (to avoid blocking
+        # HTTP requests), create a background job and return immediately.
+        if str(request.headers.get('X-Async', '')).lower() == 'true' or request.args.get('async') == '1':
+            guard_resp = _redis_required_guard()
+            if guard_resp:
+                return guard_resp
+
+            data_payload = {'job_role': job_role, 'category': category, 'difficulty': difficulty, 'num_questions': num_questions}
+
+            if use_redis_queue and rq_queue is not None:
+                try:
+                    job = rq_queue.enqueue('app.routes.interview.run_generate_questions_job', data_payload)
+                    logger.info('Enqueued generate_questions job to Redis', extra={'job_id': job.get_id(), 'user_id': str(user_id)})
+                    response = jsonify({'job_id': job.get_id()})
+                    response.status_code = 202
+                    return response
+                except Exception as exc:
+                    logger.exception('Failed to enqueue generate_questions job to Redis: %s', exc)
+                    # Fall back to in-process job creation
+
+            # In-process fallback: populate jobs store and start a thread
+            job_id = str(uuid4())
+            job_record = {
+                'status': 'pending',
+                'result': None,
+                'error': None,
+                'started_at': datetime.utcnow().isoformat(),
+                'completed_at': None,
+            }
+            with jobs_lock:
+                jobs[job_id] = job_record
+
+            def _run_local_job(job_id_local, payload):
+                logger.info('Starting in-process generate_questions job', extra={'job_id': job_id_local, 'user_id': str(user_id)})
+                start_time = datetime.utcnow()
+                result = run_generate_questions_job(payload)
+                duration = (datetime.utcnow() - start_time).total_seconds()
+                with jobs_lock:
+                    if result.get('status') == 'completed':
+                        jobs[job_id_local]['status'] = 'completed'
+                        jobs[job_id_local]['result'] = result.get('result')
+                    else:
+                        jobs[job_id_local]['status'] = 'failed'
+                        jobs[job_id_local]['error'] = result.get('error')
+                    jobs[job_id_local]['completed_at'] = datetime.utcnow().isoformat()
+                logger.info('Completed in-process generate_questions job', extra={'job_id': job_id_local, 'duration_s': duration, 'status': result.get('status')})
+
+            thread = Thread(target=_run_local_job, args=(job_id, data_payload), daemon=True)
+            thread.start()
+
+            response = jsonify({'job_id': job_id})
+            response.status_code = 202
+            return response
+
+        # Default synchronous path: generate now and return the questions
         try:
             generated = gemini_service.generate_questions(job_role, category, difficulty, num_questions)
         except Exception as exc:
@@ -195,17 +264,21 @@ def generate_questions():
             logger.exception('Gemini generate_questions failed for user %s: %s', user_id, exc)
             generated = gemini_service.get_fallback_questions(job_role, category, num_questions)
 
-        questions = [
-            InterviewQuestion(
+        questions = []
+        for question in generated[:num_questions]:
+            # Validate structure to avoid returning malformed payloads
+            if not isinstance(question, dict) or not question.get('question'):
+                logger.warning('Malformed question returned by LLM, skipping', extra={'user_id': str(user_id), 'item': question})
+                continue
+            questions.append(InterviewQuestion(
                 question.get('question', 'Tell me about your experience'),
                 category,
                 difficulty,
                 question.get('expected_answer', ''),
-            )
-            for question in generated[:num_questions]
-        ]
+            ))
+
         if not questions:
-            return jsonify({'error': 'No questions could be generated'}), 500
+            return jsonify({'success': False, 'error': 'No questions could be generated'}), 200
 
         # A generated question set consumes one interview from the plan.
         try:
@@ -247,6 +320,7 @@ def generate_questions():
     except Exception as exc:
         logger.exception('Failed to generate questions for user %s', user_id)
         return jsonify({
+            'success': False,
             'error': 'Unable to generate interview questions. Please try again.',
             'details': str(exc) if current_app.debug else None,
         }), 500
@@ -284,6 +358,7 @@ def generate_questions_job():
         # Enqueue the job using RQ. The worker should import run_generate_questions_job
         try:
             job = rq_queue.enqueue('app.routes.interview.run_generate_questions_job', data)
+            logger.info('Enqueued generate_questions job to Redis', extra={'job_id': job.get_id()})
             response = jsonify({'job_id': job.get_id()})
             response.status_code = 202
             return response
@@ -304,6 +379,7 @@ def generate_questions_job():
         jobs[job_id] = job_record
 
     def _run_local_job(job_id_local, payload):
+        logger.info('Starting in-process generate_questions job', extra={'job_id': job_id_local})
         result = run_generate_questions_job(payload)
         with jobs_lock:
             if result.get('status') == 'completed':
@@ -313,6 +389,7 @@ def generate_questions_job():
                 jobs[job_id_local]['status'] = 'failed'
                 jobs[job_id_local]['error'] = result.get('error')
             jobs[job_id_local]['completed_at'] = datetime.utcnow().isoformat()
+        logger.info('Completed in-process generate_questions job', extra={'job_id': job_id_local, 'status': jobs[job_id_local]['status']})
 
     thread = Thread(target=_run_local_job, args=(job_id, data), daemon=True)
     thread.start()

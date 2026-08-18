@@ -346,96 +346,131 @@ function InterviewSessionContent() {
     };
   }, []);
 
-  useEffect(() => {
-    const loadQuestions = async () => {
-      const jobRole = params.get('job_role') || 'Software Engineer';
-      const category = params.get('category') || 'technical';
-      const difficulty = params.get('difficulty') || 'medium';
-      // Sanitize and clamp requested number of questions to backend limits (1-10)
-      const rawNum = Number(params.get('num_questions') || 5);
-      const numQuestions = Number.isFinite(rawNum) ? Math.min(Math.max(1, Math.floor(rawNum)), 10) : 5;
+  const loadInProgressRef = useRef(false);
+  const fetchControllerRef = useRef(null);
+  const [isLoading, setIsLoading] = useState(false);
 
-      setLoadError('');
-      setCanUpgradeForLoadError(false);
+  const loadQuestions = useCallback(async () => {
+    if (loadInProgressRef.current) return; // prevent duplicate concurrent loads
+    loadInProgressRef.current = true;
+    setIsLoading(true);
 
-      const allowedCategories = getAllowedCategoriesFromStorage();
-      if (!allowedCategories.includes(category)) {
-        const error = {
-          response: {
-            status: 403,
-            data: {
-              code: 'category_not_in_plan',
-              message: 'This question category is not available on your current plan.',
-              required_tier: 'basic',
-            },
+    // Abort any previous controller and create a fresh one for this request
+    try { if (fetchControllerRef.current) fetchControllerRef.current.abort(); } catch (e) { /* ignore */ }
+    const controller = new AbortController();
+    fetchControllerRef.current = controller;
+
+    const jobRole = params.get('job_role') || 'Software Engineer';
+    const category = params.get('category') || 'technical';
+    const difficulty = params.get('difficulty') || 'medium';
+    // Sanitize and clamp requested number of questions to backend limits (1-10)
+    const rawNum = Number(params.get('num_questions') || 5);
+    const numQuestions = Number.isFinite(rawNum) ? Math.min(Math.max(1, Math.floor(rawNum)), 10) : 5;
+
+    setLoadError('');
+    setCanUpgradeForLoadError(false);
+
+    const allowedCategories = getAllowedCategoriesFromStorage();
+    if (!allowedCategories.includes(category)) {
+      const error = {
+        response: {
+          status: 403,
+          data: {
+            code: 'category_not_in_plan',
+            message: 'This question category is not available on your current plan.',
+            required_tier: 'basic',
           },
-        };
-        const questionLoadError = getQuestionLoadError(error);
-        setLoadError(questionLoadError.message);
-        setErrorCode(questionLoadError.errorCode);
-        setCanUpgradeForLoadError(questionLoadError.isPlanRestriction);
-        setShowLimitModal(true);
+        },
+      };
+      const questionLoadError = getQuestionLoadError(error);
+      setLoadError(questionLoadError.message);
+      setErrorCode(questionLoadError.errorCode);
+      setCanUpgradeForLoadError(questionLoadError.isPlanRestriction);
+      setShowLimitModal(true);
+      setIsLoading(false);
+      loadInProgressRef.current = false;
+      return;
+    }
+
+    try {
+      const data = await getQuestions({
+        job_role: jobRole,
+        category,
+        difficulty,
+        num_questions: numQuestions,
+      }, { signal: controller.signal });
+
+      if (!Array.isArray(data.questions) || data.questions.length === 0) {
+        throw new Error('No interview questions were generated. Please try again.');
+      }
+
+      setSessionId(data.session_id || `local_session_${Date.now()}`);
+      setQuestions(data.questions);
+      // Invalidate subscription and question categories caches since interview count has been incremented
+      invalidateSubscriptionCache();
+    } catch (error) {
+      // If the request was deliberately aborted, do not surface an error
+      if (error && (error.name === 'AbortError' || error.code === 'ERR_CANCELED')) {
+        console.debug('Question load aborted');
+        setIsLoading(false);
+        loadInProgressRef.current = false;
         return;
       }
 
+      const questionLoadError = getQuestionLoadError(error);
+
+      // Detect Redis-required misconfiguration and surface banner for admins/devs
       try {
-        const data = await getQuestions({
-          job_role: jobRole,
-          category,
-          difficulty,
-          num_questions: numQuestions,
-        });
-        if (!Array.isArray(data.questions) || data.questions.length === 0) {
-          throw new Error('No interview questions were generated. Please try again.');
+        if (isRedisRequiredError(error)) {
+          const msg = parseRedisRequiredMessage(error) || 'Server requires Redis in production. Please set REDIS_URL and run the worker.';
+          setRedisRequiredMessage(msg);
+          console.error('Redis required by backend:', msg);
         }
-        setSessionId(data.session_id || 'session_123');
-        setQuestions(data.questions);
-        
-        // Invalidate subscription and question categories caches since interview count has been incremented
-        invalidateSubscriptionCache();
-      } catch (error) {
-        const questionLoadError = getQuestionLoadError(error);
-
-        // Detect Redis-required misconfiguration and surface banner for admins/devs
-        try {
-          if (isRedisRequiredError(error)) {
-            const msg = parseRedisRequiredMessage(error) || 'Server requires Redis in production. Please set REDIS_URL and run the worker.';
-            setRedisRequiredMessage(msg);
-            console.error('Redis required by backend:', msg);
-          }
-        } catch (e) {
-          // ignore
-        }
-
-        if (questionLoadError.errorCode === 'interview_limit_reached') {
-          invalidateSubscriptionCache();
-          router.replace('/subscription?upgrade_prompt=limit_reached');
-          return;
-        }
-
-        if (questionLoadError.errorCode === 'session_expired') {
-          router.replace('/auth?next=/interview/setup');
-          return;
-        }
-
-        setLoadError(questionLoadError.message);
-        setErrorCode(questionLoadError.errorCode);
-        setCanUpgradeForLoadError(questionLoadError.isPlanRestriction);
-
-        if (questionLoadError.isPlanRestriction) {
-          setShowLimitModal(true);
-        } else {
-          toast.error(questionLoadError.message, { duration: 5000 });
-        }
-
-        if (!error.response || error.response.status >= 500 || error.code === 'ERR_NETWORK') {
-          console.error('Failed to load interview questions:', error);
-        }
+      } catch (e) {
+        // ignore
       }
-    };
 
-    loadQuestions();
+      if (questionLoadError.errorCode === 'interview_limit_reached') {
+        invalidateSubscriptionCache();
+        router.replace('/subscription?upgrade_prompt=limit_reached');
+        setIsLoading(false);
+        loadInProgressRef.current = false;
+        return;
+      }
+
+      if (questionLoadError.errorCode === 'session_expired') {
+        router.replace('/auth?next=/interview/setup');
+        setIsLoading(false);
+        loadInProgressRef.current = false;
+        return;
+      }
+
+      setLoadError(questionLoadError.message);
+      setErrorCode(questionLoadError.errorCode);
+      setCanUpgradeForLoadError(questionLoadError.isPlanRestriction);
+
+      if (questionLoadError.isPlanRestriction) {
+        setShowLimitModal(true);
+      } else {
+        toast.error(questionLoadError.message, { duration: 5000 });
+      }
+
+      if (!error.response || error.response.status >= 500 || error.code === 'ERR_NETWORK') {
+        console.error('Failed to load interview questions:', error);
+      }
+    } finally {
+      setIsLoading(false);
+      loadInProgressRef.current = false;
+    }
   }, [params, router]);
+
+  useEffect(() => {
+    loadQuestions();
+
+    return () => {
+      try { if (fetchControllerRef.current) fetchControllerRef.current.abort(); } catch (e) { /* ignore */ }
+    };
+  }, [loadQuestions]);
 
   // Timer: starts when questions are loaded, resets on each question change
   useEffect(() => {
@@ -488,15 +523,33 @@ function InterviewSessionContent() {
         return;
       }
 
-      const result = await submitAnswer({
-        question: currentQuestion.question,
-        answer: submittedAnswer,
-        expected_answer: currentQuestion.expected_answer,
-        session_id: sessionId,
-        question_index: currentIndex,
-        video_data: Boolean(videoBlob),
-        expression_stats: expressionStats || null,
-      });
+      // Build a sanitized payload for the analysis API. Include both question
+      // text and a question_id if the server provided one previously so the
+      // backend can reference stored prompts or cached context instead of
+      // re-parsing the whole question text.
+      const payload = {
+       question: currentQuestion.question,
+       question_id: currentQuestion.id || currentQuestion.question_id || null,
+       answer: submittedAnswer,
+       expected_answer: currentQuestion.expected_answer,
+       // Ensure a session_id is always present; fall back to a short local id
+       // so the server receives a non-null value rather than undefined/null.
+       session_id: sessionId || `local_session_${Date.now()}`,
+       question_index: currentIndex,
+       video_data: Boolean(videoBlob),
+       expression_stats: expressionStats || null,
+      };
+
+      // Debug outgoing payload (dev only) to help diagnose server-side errors
+      try {
+       if (typeof process !== 'undefined' && process.env && process.env.NODE_ENV !== 'production') {
+         console.debug('Submitting answer payload:', JSON.stringify(payload, null, 2));
+       }
+      } catch (e) {
+       // ignore serialization failures
+      }
+
+      const result = await submitAnswer(payload);
 
       // Check if response contains an error
       if (result.error) {
@@ -604,8 +657,21 @@ function InterviewSessionContent() {
                 >
                   Back to setup
                 </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setLoadError('');
+                    setErrorCode(null);
+                    loadQuestions();
+                  }}
+                  className="rounded-lg bg-blue-600 px-4 py-2 text-white hover:bg-blue-700"
+                >
+                  Retry
+                </button>
               </div>
             </div>
+          ) : isLoading ? (
+            <div className="text-xl text-gray-600">Loading questions...</div>
           ) : (
             <div className="text-xl text-gray-600">Loading questions...</div>
           )}
