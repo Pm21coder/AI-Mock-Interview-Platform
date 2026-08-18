@@ -1,0 +1,16 @@
+version: 0.2
+phases:
+  install:
+    runtime-versions:
+      nodejs: 18
+    commands:
+      - echo "Entering frontend directory"
+      - cd mock-interview-platform/frontend
+      - npm ci
+  build:
+    commands:
+      - npm run build
+artifacts:
+  base-directory: mock-interview-platform/frontend/build
+  files:
+    - '**/*'
