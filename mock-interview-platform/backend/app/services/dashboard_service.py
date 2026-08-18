@@ -1,4 +1,5 @@
 import json
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -28,6 +29,26 @@ class DashboardService:
     # still need to see the interviews they just completed. Keep the
     # idempotency guard in-process alongside the fallback stats cache.
     _in_memory_processed_sessions = set()
+
+    # ------------------------------------------------------------------
+    # Optional Redis-backed cache
+    # ------------------------------------------------------------------
+    # Use Redis when REDIS_URL is configured and the redis package is
+    # available. This reduces backend CPU work during heavy rebuilds and
+    # makes get_stats responsive for the frontend polling loop.
+    _redis = None
+    _redis_ttl_seconds = 5
+    try:
+        _redis_url = __import__('os').getenv('REDIS_URL')
+        if _redis_url:
+            try:
+                _redis_module = __import__('redis')
+                _redis = _redis_module.from_url(_redis_url)
+            except Exception:
+                # Redis module present but connection failed — keep _redis None
+                _redis = None
+    except Exception:
+        _redis = None
 
     # ------------------------------------------------------------------
     # Read operations
@@ -65,13 +86,53 @@ class DashboardService:
                 if (utc_now() - ts).total_seconds() < self._cache_ttl_seconds:
                     return cached_value
 
+            # If Redis is available, try a Redis-backed cache first to
+            # reduce load and avoid long MongoDB aggregations during rebuilds.
+            try:
+                if self._redis is not None:
+                    try:
+                        key = f"dashboard_stats:{user_id}"
+                        raw = self._redis.get(key)
+                        if raw:
+                            try:
+                                payload = json.loads(raw)
+                                stats = DashboardStats.from_dict(payload)
+                                # Refresh local in-process cache and return
+                                self._cache[user_id] = (stats, utc_now())
+                                return stats
+                            except Exception:
+                                # If Redis payload is malformed, fall back to DB below
+                                pass
+                    except Exception as exc:
+                        # Non-fatal: if Redis read fails, continue to MongoDB
+                        print(f'DashboardService.get_stats Redis read error: {exc}')
+            except Exception:
+                # Ignore Redis initialization/read errors and continue
+                pass
+
             # Try MongoDB first (primary source)
             if current_app.config.get('MONGO_AVAILABLE', True):
                 try:
+                    start_db = time.time()
                     doc = mongo.db[self.COLLECTION].find_one({'user_id': user_id})
+                    duration = time.time() - start_db
+                    if duration > 2.0:
+                        try:
+                            current_app.logger.warning('Slow dashboard_stats MongoDB read', extra={'user_id': user_id, 'duration_s': duration})
+                        except Exception:
+                            print(f'Slow dashboard_stats MongoDB read for {user_id}: {duration}s')
                     if doc:
                         stats = DashboardStats.from_dict(doc)
                         self._cache[user_id] = (stats, utc_now())
+                        # Also populate Redis cache for future fast reads
+                        try:
+                            if self._redis is not None:
+                                try:
+                                    self._redis.set(f"dashboard_stats:{user_id}", json.dumps(stats.to_dict(), default=str), ex=self._redis_ttl_seconds)
+                                except Exception:
+                                    pass
+                        except Exception:
+                            pass
                         return stats
                 except Exception as exc:
                     print(f'DashboardService.get_stats MongoDB error: {exc}')
@@ -116,6 +177,15 @@ class DashboardService:
             payload = self._load_fallback_stats()
             payload[str(stats.user_id)] = stats_dict
             self._save_fallback_stats(payload)
+            # Also populate Redis so the web tier can read it quickly while Mongo writes
+            try:
+                if self._redis is not None:
+                    try:
+                        self._redis.set(f"dashboard_stats:{stats.user_id}", json.dumps(stats_dict, default=str), ex=self._redis_ttl_seconds)
+                    except Exception:
+                        pass
+            except Exception:
+                pass
         except Exception as exc:
             print(f'DashboardService.save_stats JSON fallback error: {exc}')
         
@@ -131,6 +201,15 @@ class DashboardService:
                 upsert=True,
             )
             self._cache[stats.user_id] = (stats, utc_now())
+            # Keep Redis in sync after Mongo write
+            try:
+                if self._redis is not None:
+                    try:
+                        self._redis.set(f"dashboard_stats:{stats.user_id}", json.dumps(stats_dict, default=str), ex=self._redis_ttl_seconds)
+                    except Exception:
+                        pass
+            except Exception:
+                pass
             return True
         except Exception as exc:
             print(f'DashboardService.save_stats MongoDB error: {exc}')

@@ -72,9 +72,10 @@ class Config:
     # Use a stable Gemini model name that is supported by both the legacy and
     # modern Google SDKs. Strip any legacy `models/` prefix before use.
     GOOGLE_GEMINI_MODEL = os.getenv('GOOGLE_GEMINI_MODEL', 'gemini-2.0-flash')
-    # Use Gemini whenever a valid API key is configured. The service retains
-    # local fallbacks for unavailable credentials or provider errors.
-    ENABLE_GEMINI = os.getenv('ENABLE_GEMINI', 'true').lower() == 'true'
+    # By default prefer a generic HTTP LLM provider (e.g., Deepseek) over
+    # the Google Gemini SDK for interview generation and analysis. Set
+    # ENABLE_GEMINI=true only if you explicitly want to use Google Gemini.
+    ENABLE_GEMINI = os.getenv('ENABLE_GEMINI', 'false').lower() == 'true'
     # Keep interactive endpoints responsive when the external AI provider is
     # slow or unreachable; the service supplies local fallback responses.
     GEMINI_TIMEOUT_SECONDS = float(os.getenv('GEMINI_TIMEOUT_SECONDS', '10'))

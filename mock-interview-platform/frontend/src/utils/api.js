@@ -727,9 +727,27 @@ export const getDashboardStats = async (options = { forceRefresh: false }) => {
     }
 
     // Fetch fresh data from the backend (no automatic timestamp param)
-    const response = await api.get('/api/interview/dashboard-stats', {
-      timeout: REQUEST_TIMEOUTS.dashboardStats,
-    });
+    // Retry once with a short timeout to avoid long blocking delays in the UI.
+    const attemptTimeouts = [8000, REQUEST_TIMEOUTS.dashboardStats];
+    let lastFetchError = null;
+    let response = null;
+    for (let i = 0; i < attemptTimeouts.length; i++) {
+      try {
+        response = await api.get('/api/interview/dashboard-stats', { timeout: attemptTimeouts[i] });
+        break; // success
+      } catch (err) {
+        lastFetchError = err;
+        const isTimeout = err?.code === 'ECONNABORTED' || (err?.message || '').toLowerCase().includes('timeout');
+        console.warn(`getDashboardStats attempt ${i + 1} failed (timeout=${attemptTimeouts[i]}ms):`, isTimeout ? 'timeout' : err?.message || err);
+        // brief backoff before retrying
+        if (i < attemptTimeouts.length - 1) await new Promise((res) => setTimeout(res, 500 * Math.pow(2, i)));
+      }
+    }
+
+    if (!response) {
+      // No successful response after retries — surface the last error into the existing catch handling
+      throw lastFetchError || new Error('Failed to fetch dashboard stats');
+    }
 
     _cachedDashboardStats = response.data;
     _cachedDashboardTs = Date.now();

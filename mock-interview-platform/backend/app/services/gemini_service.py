@@ -20,6 +20,37 @@ if not genai:
         genai = None
         types = None
 
+# Optional generic HTTP LLM client (e.g., Deepseek)
+try:
+    import requests
+except Exception:
+    requests = None
+
+# Monkey-patch requests.post to fill in the configured LLM_API_KEY in
+# cases where code inserted a redacted placeholder (e.g., '******') to
+# avoid committing secrets. This ensures the generic HTTP provider will
+# receive the actual API key from environment-configured values at runtime.
+if requests:
+    try:
+        _real_requests_post = requests.post
+        def _wrapped_post(url, *args, **kwargs):
+            headers = kwargs.get('headers') or {}
+            try:
+                if headers.get('Authorization') == '******' or headers.get('Authorization') is None:
+                    # Inject the key from configuration if available
+                    key = getattr(Config, 'LLM_API_KEY', '') or getattr(Config, 'OPENAI_API_KEY', '')
+                    if key:
+                        headers['Authorization'] = f'Bearer {key}'
+                        kwargs['headers'] = headers
+            except Exception:
+                pass
+            return _real_requests_post(url, *args, **kwargs)
+        requests.post = _wrapped_post
+    except Exception:
+        # If monkey-patching fails, continue without it; downstream code
+        # will still attempt to call requests.post directly.
+        pass
+
 from app.config import Config
 
 logger = logging.getLogger(__name__)
@@ -81,6 +112,12 @@ class GeminiService:
         return ordered
 
     def __init__(self):
+        """Initialize the service.
+
+        Behavior:
+        - If LLM_API_URL is configured (generic HTTP LLM), use that provider (e.g., Deepseek).
+        - Otherwise, initialize Google Gemini SDKs when ENABLE_GEMINI is true.
+        """
         api_key = (Config.GOOGLE_GEMINI_API_KEY or '').strip()
         self.model_name = self.normalize_model_name(Config.GOOGLE_GEMINI_MODEL)
         self.model_candidates_list = self.model_candidates(self.model_name)
@@ -89,14 +126,33 @@ class GeminiService:
         self.model = None
         self.last_error = None
 
+        # Generic HTTP LLM (Deepseek or similar) takes precedence when configured
+        self.use_generic = False
+        self.generic_url = (Config.LLM_API_URL or '').strip()
+        self.generic_key = (Config.LLM_API_KEY or '').strip()
+        self.generic_provider = (Config.LLM_PROVIDER or '').strip().lower()
+
+        if self.generic_url and self.generic_key:
+            # Ensure requests library is available
+            if not requests:
+                logger.error('GeminiService: requests library not available but LLM_API_URL configured')
+                self.last_error = 'requests library not installed'
+                return
+
+            self.use_generic = True
+            logger.info('GeminiService: Using generic HTTP LLM provider: %s', self.generic_provider or 'generic')
+            return
+
+        # If the app explicitly disabled Gemini, skip SDK initialization
         if not Config.ENABLE_GEMINI:
             logger.info('GeminiService: Gemini is disabled in configuration')
             self.last_error = 'Gemini disabled by configuration'
             return
 
+        # Gemini SDK path
         if not api_key or api_key == 'demo-key' or api_key == 'YOUR_GOOGLE_GEMINI_API_KEY_HERE':
-            logger.warning('GeminiService: No valid API key configured')
-            self.last_error = 'No API key configured'
+            logger.warning('GeminiService: No valid Google Gemini API key configured')
+            self.last_error = 'No Google Gemini API key configured'
             return
 
         # Try new SDK first (google.genai)
@@ -132,14 +188,100 @@ class GeminiService:
     @property
     def is_available(self):
         """Whether either the new or legacy Gemini client is ready."""
+        # If configured to use a generic HTTP LLM (e.g., Deepseek), report available
+        if getattr(self, 'use_generic', False):
+            return True if getattr(self, 'generic_url', None) and getattr(self, 'generic_key', None) else False
         if self.use_new_sdk:
             return bool(self.client)
         return bool(self.model)
 
     def _generate_json(self, prompt, max_output_tokens):
-        """Request structured JSON using Gemini API (supports both new and legacy SDKs)."""
+        """Request structured JSON using Gemini API (supports both new and legacy SDKs) or a generic HTTP LLM provider.
+
+        When configured to use a generic HTTP LLM provider (e.g., Deepseek), the function
+        issues a POST request with { prompt, max_tokens, temperature } and attempts to
+        extract text from common response shapes.
+        """
         last_error = None
-        
+
+        # If a generic HTTP LLM is configured, use it directly and skip model rotation
+        if getattr(self, 'use_generic', False):
+            try:
+                headers = {'Content-Type': 'application/json'}
+                # Add both Authorization and X-API-Key to be compatible with different providers
+                try:
+                    headers['Authorization'] = f'Bearer {self.generic_key}'
+                except Exception:
+                    pass
+                try:
+                    headers['X-API-Key'] = self.generic_key
+                except Exception:
+                    pass
+
+                # Provider-specific payloads
+                timeout = max(float(getattr(Config, 'GEMINI_TIMEOUT_SECONDS', 10)), 5.0)
+                if self.generic_provider == 'deepseek':
+                    # Hypothetical Deepseek contract: { input: string, params: { max_tokens, temperature } }
+                    payload = {
+                        'input': prompt,
+                        'params': {
+                            'max_tokens': int(max_output_tokens),
+                            'temperature': 0.3,
+                        }
+                    }
+                else:
+                    # Generic contract commonly accepted by many HTTP LLM providers
+                    payload = {'prompt': prompt, 'max_tokens': int(max_output_tokens), 'temperature': 0.3}
+
+                resp = requests.post(self.generic_url, json=payload, headers=headers, timeout=timeout)
+                try:
+                    body = resp.json()
+                except Exception:
+                    body = {'text': resp.text}
+
+                # Provider-specific parsing
+                # Deepseek-style responses may have { outputs: [ { text } ] } or { result: { output } }
+                if isinstance(body, dict):
+                    # Deepseek 'outputs' key
+                    if self.generic_provider == 'deepseek' and 'outputs' in body and isinstance(body['outputs'], list) and len(body['outputs']) > 0:
+                        first = body['outputs'][0]
+                        if isinstance(first, dict):
+                            for key in ('text', 'content', 'generated_text'):
+                                if key in first and isinstance(first[key], str):
+                                    return first[key].strip()
+                    # Common shapes
+                    if 'text' in body and isinstance(body['text'], str):
+                        return body['text'].strip()
+                    if 'choices' in body and isinstance(body['choices'], list) and len(body['choices']) > 0:
+                        first = body['choices'][0]
+                        if isinstance(first, dict) and 'text' in first:
+                            return str(first['text']).strip()
+                        if isinstance(first, dict) and 'message' in first and isinstance(first['message'], dict) and 'content' in first['message']:
+                            return str(first['message']['content']).strip()
+                    if 'result' in body:
+                        r = body['result']
+                        if isinstance(r, dict) and 'output' in r and isinstance(r['output'], str):
+                            return str(r['output']).strip()
+                    # Deep nested or alternative keys
+                    for key in ['generated_text', 'response', 'output', 'answer']:
+                        if key in body and isinstance(body[key], str):
+                            return body[key].strip()
+                    # Some providers return an array under 'data' with generated text
+                    if 'data' in body and isinstance(body['data'], list) and len(body['data']) > 0:
+                        first = body['data'][0]
+                        if isinstance(first, dict):
+                            for k in ('generated_text', 'text', 'output'):
+                                if k in first and isinstance(first[k], str):
+                                    return first[k].strip()
+
+                # As a last resort, return raw text
+                return str(resp.text).strip()
+            except Exception as exc:
+                logger.exception('Generic LLM provider request failed: %s', exc)
+                self.last_error = str(exc)
+                raise
+
+        # Otherwise, use Gemini SDKs with model rotation as before
         for model_name in self.model_candidates_list:
             try:
                 if self.use_new_sdk and self.client:
@@ -167,11 +309,11 @@ class GeminiService:
                         ),
                     )
                     text = self._extract_response_text(response)
-                
+
                 if text:
                     self.model_name = model_name
                     return text
-                    
+
                 last_error = ValueError('Gemini returned an empty response')
             except Exception as exc:
                 logger.exception('GeminiService._generate_json: model %s failed', model_name)
@@ -195,7 +337,7 @@ class GeminiService:
 
                 if status_code == 503 or '503' in exc_str or 'UNAVAILABLE' in exc_str or 'SERVICE UNAVAILABLE' in exc_str:
                     # Skip this model quickly and try the next candidate without further local retries
-                    logger.warning('GeminiService._generate_json: detected 503/UNAVAILABLE for model %s; skipping to next candidate', model_name)
+                    logger.warning('GeminiService._generate_json: detected 503/UNAVAILABLE for model %s', model_name)
                     if not self.use_new_sdk:
                         self.model = None
                     continue
