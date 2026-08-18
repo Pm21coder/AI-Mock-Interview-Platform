@@ -489,26 +489,41 @@ def analyze_answer():
     user_id = current_user_id()
     subscription_user_id = current_subscription_user_id()
 
+    # Assign a per-request id to correlate frontend and backend logs
+    req_id = str(uuid4())
+
+    # Quick guard: reject excessively large payloads early to avoid OOM or long parsing
+    try:
+        content_len = int(request.content_length or 0)
+    except Exception:
+        content_len = 0
+    if content_len > 2_000_000:  # 2 MB limit
+        logger.warning('analyze_answer rejected: request too large', extra={'user_id': user_id, 'req_id': req_id, 'content_length': content_len})
+        return jsonify({'error': 'Payload too large'}), 413
+
     # Parse JSON safely and log lightweight request metadata to aid debugging
     try:
         data = request.get_json(silent=True) or {}
     except Exception as parse_exc:
-        logger.warning('Failed to parse JSON body for analyze_answer: %s', parse_exc)
+        logger.warning('Failed to parse JSON body for analyze_answer', extra={'req_id': req_id, 'user_id': user_id, 'exc': str(parse_exc)})
         data = {}
 
     # Log request summary (do not log large fields like video_data)
     try:
         keys = list(data.keys()) if isinstance(data, dict) else []
         logger.info(
-            'analyze_answer request: user=%s session=%s content_length=%s keys=%s',
-            user_id,
-            data.get('session_id'),
-            request.content_length,
-            keys,
+            'analyze_answer request',
+            extra={
+                'req_id': req_id,
+                'user_id': user_id,
+                'session': data.get('session_id'),
+                'content_length': content_len,
+                'keys': keys,
+            }
         )
     except Exception:
         # Best effort logging — never let logging raise and crash the handler
-        logger.debug('analyze_answer: failed to record request metadata')
+        logger.debug('analyze_answer: failed to record request metadata', extra={'req_id': req_id})
 
     question = data.get('question')
     answer = (data.get('answer') or '').strip()
@@ -817,8 +832,49 @@ def get_dashboard_stats():
         # zero even when completed interview documents exist. Rebuild each
         # legacy record once to backfill its history.
         stats = dashboard_service.get_stats(user_id)
-        if stats is None or stats.history_synced_at is None:
-            stats = dashboard_service.rebuild_from_interviews(user_id)
+        # If there's no prebuilt stats record or history hasn't been synced yet,
+        # avoid recomputing heavy aggregates synchronously in the request path.
+        # Kick off an async rebuild in the background and return the current
+        # cached/fallback stats promptly so the dashboard doesn't hit timeouts.
+        if stats is None:
+            # Return an immediate empty-ish payload while rebuilding asynchronously
+            placeholder = {
+                'stats': {
+                    'interviews_completed': 0,
+                    'average_score': 0,
+                    'confidence_score': 0,
+                },
+                'recent_interviews': [],
+                'rebuilding': True,
+            }
+
+            def _rebuild_async(u_id):
+                try:
+                    current_app.logger.info('Starting background dashboard rebuild', extra={'user_id': u_id})
+                    dashboard_service.rebuild_from_interviews(u_id)
+                    current_app.logger.info('Background dashboard rebuild completed', extra={'user_id': u_id})
+                except Exception as e:
+                    current_app.logger.exception('Background dashboard rebuild failed', exc_info=e)
+
+            from threading import Thread
+            Thread(target=_rebuild_async, args=(user_id,), daemon=True).start()
+
+            response = jsonify(optimize_response(placeholder))
+            response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+            response.headers['Pragma'] = 'no-cache'
+            return response
+
+        if stats.history_synced_at is None:
+            # Trigger an asynchronous rebuild but return current stats if available.
+            from threading import Thread
+            def _rebuild_if_needed(u_id):
+                try:
+                    current_app.logger.info('Triggering background rebuild for missing history sync', extra={'user_id': u_id})
+                    dashboard_service.rebuild_from_interviews(u_id)
+                    current_app.logger.info('Background rebuild finished', extra={'user_id': u_id})
+                except Exception as e:
+                    current_app.logger.exception('Background rebuild failed', exc_info=e)
+            Thread(target=_rebuild_if_needed, args=(user_id,), daemon=True).start()
 
         response_data = {
             'stats': {
@@ -828,7 +884,7 @@ def get_dashboard_stats():
             },
             'recent_interviews': stats.recent_interviews
         }
-        
+
         response = jsonify(optimize_response(response_data))
         # Prevent intermediate caches from serving stale, sensitive dashboard statistics
         response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'

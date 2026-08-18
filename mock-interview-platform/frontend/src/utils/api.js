@@ -38,6 +38,31 @@ const API_LOG_THROTTLE_TTL = 30_000; // 30 seconds
 const _apiLogLast = new Map();
 
 function logApiError(endpoint, error) {
+  // Treat request cancellations as non-error-level diagnostics. These are
+  // expected when users navigate away or abort a request, and shouldn't
+  // be noisy in the console.
+  try {
+    const isCanceled = (
+      error && (
+        error.code === 'ERR_CANCELED' ||
+        error.name === 'CanceledError' ||
+        error.name === 'AbortError' ||
+        (typeof error.message === 'string' && error.message.toLowerCase().includes('canceled'))
+      )
+    );
+    if (isCanceled) {
+      // Keep cancellations at debug level and avoid spammy stack traces.
+      if (typeof process !== 'undefined' && process.env && process.env.NODE_ENV !== 'production') {
+        console.debug(`API request canceled at ${endpoint}:`, error?.message || error);
+      } else {
+        console.warn(`API request canceled at ${endpoint}: ${error?.message || 'canceled'}`);
+      }
+      return;
+    }
+  } catch (e) {
+    // ignore cancellation detection failures and continue to normal logging
+  }
+
   // Throttle repeated logs for the same endpoint/status to reduce noise.
   try {
     const now = Date.now();

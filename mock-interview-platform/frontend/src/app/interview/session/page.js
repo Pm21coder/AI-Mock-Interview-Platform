@@ -462,7 +462,7 @@ function InterviewSessionContent() {
       setIsLoading(false);
       loadInProgressRef.current = false;
     }
-  }, [params, router]);
+  }, [params?.toString(), router]);
 
   useEffect(() => {
     loadQuestions();
