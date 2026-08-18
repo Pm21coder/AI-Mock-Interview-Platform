@@ -202,12 +202,47 @@ export const login = async (credentials) => {
 };
 
 // Helper to create a job and poll for completion
+// Detect Redis-required 503 responses and provide a typed error
+function isRedisRequiredError(err) {
+  try {
+    if (!err || !err.response) return false;
+    if (err.response.status !== 503) return false;
+    const msg = err.response.data?.error || err.response.data?.message || '';
+    return /redis/i.test(msg) || /required in production/i.test(msg) || /set REDIS_URL/i.test(msg);
+  } catch (e) {
+    return false;
+  }
+}
+
+function parseRedisRequiredMessage(err) {
+  if (!err || !err.response) return null;
+  return err.response.data?.error || err.response.data?.message || null;
+}
+
 async function createJobAndPoll(jobEndpoint, pollEndpointBase, payload, totalTimeout = REQUEST_TIMEOUTS.interviewQuestions) {
-  // Allow 202 responses without throwing
-  const createResp = await api.post(jobEndpoint, payload, {
-    timeout: Math.min(10_000, totalTimeout),
-    validateStatus: (status) => status < 500,
-  });
+  // Allow 202 responses without throwing. Wrap create in try/catch so 503 responses
+  // can be detected and surfaced to the UI as a special actionable error.
+  let createResp;
+  try {
+    createResp = await api.post(jobEndpoint, payload, {
+      timeout: Math.min(10_000, totalTimeout),
+      validateStatus: (status) => status < 500,
+    });
+  } catch (err) {
+    // If the backend explicitly returned 503 with a Redis-required message,
+    // attach a flag so the UI can show an actionable admin banner.
+    if (isRedisRequiredError(err)) {
+      logApiError(jobEndpoint, err);
+      const msg = parseRedisRequiredMessage(err) || 'Server requires Redis to process jobs. Set REDIS_URL and run a worker.';
+      const out = new Error(msg);
+      out.isRedisRequired = true;
+      out.status = 503;
+      throw out;
+    }
+
+    // Re-throw other errors so callers can handle timeouts / network issues
+    throw err;
+  }
 
   if (createResp.status === 202 && createResp.data?.job_id) {
     const jobId = createResp.data.job_id;
@@ -740,5 +775,5 @@ export const getFeedbackHistoryLimit = async () => {
   return response.data;
 };
 
-
+export { isRedisRequiredError, parseRedisRequiredMessage };
 

@@ -79,6 +79,11 @@ class Config:
     # slow or unreachable; the service supplies local fallback responses.
     GEMINI_TIMEOUT_SECONDS = float(os.getenv('GEMINI_TIMEOUT_SECONDS', '10'))
 
+    # Require Redis in production to avoid in-process threaded fallbacks that
+    # are unsafe on serverless or multi-worker deployments. Set to 'false' to
+    # allow in-process fallback (useful only for local development).
+    REQUIRE_REDIS_IN_PRODUCTION = os.getenv('REQUIRE_REDIS_IN_PRODUCTION', 'true').lower() == 'true'
+
     # Razorpay Configuration
     RAZORPAY_KEY_ID = os.getenv('RAZORPAY_KEY_ID', '')
     RAZORPAY_KEY_SECRET = os.getenv('RAZORPAY_KEY_SECRET', '')

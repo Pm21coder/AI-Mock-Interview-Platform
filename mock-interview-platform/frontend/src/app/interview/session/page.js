@@ -8,7 +8,7 @@ import QuestionDisplay from '../../../components/QuestionDisplay';
 import VideoRecorder from '../../../components/VideoRecorder';
 import FeedbackDisplay from '../../../components/FeedbackDisplay';
 import LimitErrorModal from '../../../components/LimitErrorModal';
-import { getQuestions, submitAnswer, getFeedback } from '../../../utils/api';
+import { getQuestions, submitAnswer, getFeedback, isRedisRequiredError, parseRedisRequiredMessage } from '../../../utils/api';
 import { invalidateSubscriptionCache } from '../../../hooks/useSubscription';
 
 function getSpeechErrorMessage(error) {
@@ -121,6 +121,7 @@ function InterviewSessionContent() {
   const [showLimitModal, setShowLimitModal] = useState(false);
   const [canUpgradeForLoadError, setCanUpgradeForLoadError] = useState(false);
   const [speechState, setSpeechState] = useState('checking');
+  const [redisRequiredMessage, setRedisRequiredMessage] = useState(null);
   const [speechMessage, setSpeechMessage] = useState('');
   const [timeElapsed, setTimeElapsed] = useState(0);
   const recognitionRef = useRef(null);
@@ -395,6 +396,17 @@ function InterviewSessionContent() {
       } catch (error) {
         const questionLoadError = getQuestionLoadError(error);
 
+        // Detect Redis-required misconfiguration and surface banner for admins/devs
+        try {
+          if (isRedisRequiredError(error)) {
+            const msg = parseRedisRequiredMessage(error) || 'Server requires Redis in production. Please set REDIS_URL and run the worker.';
+            setRedisRequiredMessage(msg);
+            console.error('Redis required by backend:', msg);
+          }
+        } catch (e) {
+          // ignore
+        }
+
         if (questionLoadError.errorCode === 'interview_limit_reached') {
           invalidateSubscriptionCache();
           router.replace('/subscription?upgrade_prompt=limit_reached');
@@ -519,6 +531,16 @@ function InterviewSessionContent() {
       }
       setLoadError('');
     } catch (error) {
+      // If the backend indicates Redis is required in production, surface the admin banner
+      try {
+        if (isRedisRequiredError(error)) {
+          const msg = parseRedisRequiredMessage(error) || 'Server requires Redis in production. Please set REDIS_URL and run the worker.';
+          setRedisRequiredMessage(msg);
+        }
+      } catch (e) {
+        // ignore
+      }
+
       const errorMessage = error.response?.data?.error || error.message || 'Failed to analyze answer';
       setLoadError(`Error: ${errorMessage}`);
       toast.error(errorMessage, { duration: 5000 });
@@ -631,6 +653,29 @@ function InterviewSessionContent() {
           }
         }}
       />
+
+      {redisRequiredMessage && (
+        <div className="mb-4 rounded-lg bg-yellow-50 p-4 border border-yellow-200">
+          <div className="flex items-start justify-between">
+            <div className="flex items-start gap-3">
+              <span className="text-xl text-yellow-700">⚠️</span>
+              <div>
+                <p className="font-semibold text-yellow-900">Background job processing is not configured</p>
+                <p className="text-yellow-800 text-sm">{redisRequiredMessage}</p>
+                <p className="text-xs text-gray-600 mt-1">To resolve: set the REDIS_URL environment variable for the backend and start the worker process (see DEPLOYMENT_QUICK_REFERENCE.md).</p>
+              </div>
+            </div>
+            <div>
+              <button
+                onClick={() => setRedisRequiredMessage(null)}
+                className="ml-4 rounded bg-yellow-100 px-3 py-1 text-sm font-medium text-yellow-800 hover:bg-yellow-200"
+              >
+                Dismiss
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="container mx-auto px-4 py-8">
         {/* Progress bar and timer */}

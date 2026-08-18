@@ -2,7 +2,7 @@ from datetime import datetime
 from uuid import uuid4
 import logging
 
-from flask import Blueprint, current_app, jsonify, request
+from flask import Blueprint, current_app, jsonify, request, Response, stream_with_context
 
 from app import mongo, limiter
 from app.config import Config
@@ -252,39 +252,106 @@ def generate_questions():
         }), 500
 
 
+def _redis_required_guard():
+    """Return a tuple (response, status) when Redis is required but not configured.
+    Returns None when it's ok to proceed. Uses Config.REQUIRE_REDIS_IN_PRODUCTION
+    and FLASK_DEBUG to decide whether Redis must be present.
+    """
+    # In production (FLASK_DEBUG False) require Redis when configured to do so
+    if not Config.FLASK_DEBUG and Config.REQUIRE_REDIS_IN_PRODUCTION and not use_redis_queue:
+        logger.error('Redis is required in production but REDIS_URL is not configured or Redis is unavailable')
+        return jsonify({
+            'error': 'Server misconfiguration: Redis is required in production to process background jobs. Please set REDIS_URL and start a worker.'
+        }), 503
+    return None
+
+
 @interview_bp.route('/generate-questions-job', methods=['POST'])
 @token_required
 @limiter.limit("10 per minute")
 def generate_questions_job():
-        """Start a background job to generate questions and return a job_id immediately.
-        Client should poll /api/interview/job/<job_id> for status/result.
-        """
-        data = request.get_json(silent=True) or {}
+    """Start a background job to generate questions and return a job_id immediately.
+    Client should poll /api/interview/job/<job_id> for status/result.
+    """
+    # Guard: do not allow in-process fallback in production
+    guard_resp = _redis_required_guard()
+    if guard_resp:
+        return guard_resp
 
-        if use_redis_queue and rq_queue is not None:
-            # Enqueue the job using RQ. The worker should import run_generate_questions_job
-            try:
-                job = rq_queue.enqueue('app.routes.interview.run_generate_questions_job', data)
-                response = jsonify({'job_id': job.get_id()})
-                response.status_code = 202
-                return response
-            except Exception as exc:
-                logger.exception('Failed to enqueue generate_questions job to Redis: %s', exc)
-                # Fall back to in-process job creation
+    data = request.get_json(silent=True) or {}
 
-        # In-process fallback: populate jobs store and start a thread
+    if use_redis_queue and rq_queue is not None:
+        # Enqueue the job using RQ. The worker should import run_generate_questions_job
+        try:
+            job = rq_queue.enqueue('app.routes.interview.run_generate_questions_job', data)
+            response = jsonify({'job_id': job.get_id()})
+            response.status_code = 202
+            return response
+        except Exception as exc:
+            logger.exception('Failed to enqueue generate_questions job to Redis: %s', exc)
+            # Fall back to in-process job creation
+
+    # In-process fallback: populate jobs store and start a thread
+    job_id = str(uuid4())
+    job_record = {
+        'status': 'pending',
+        'result': None,
+        'error': None,
+        'started_at': datetime.utcnow().isoformat(),
+        'completed_at': None,
+    }
+    with jobs_lock:
+        jobs[job_id] = job_record
+
+    def _run_local_job(job_id_local, payload):
+        result = run_generate_questions_job(payload)
+        with jobs_lock:
+            if result.get('status') == 'completed':
+                jobs[job_id_local]['status'] = 'completed'
+                jobs[job_id_local]['result'] = result.get('result')
+            else:
+                jobs[job_id_local]['status'] = 'failed'
+                jobs[job_id_local]['error'] = result.get('error')
+            jobs[job_id_local]['completed_at'] = datetime.utcnow().isoformat()
+
+    thread = Thread(target=_run_local_job, args=(job_id, data), daemon=True)
+    thread.start()
+
+    response = jsonify({'job_id': job_id})
+    response.status_code = 202
+    return response
+
+
+@interview_bp.route('/stream/generate-questions', methods=['POST'])
+@token_required
+@limiter.limit("10 per minute")
+def stream_generate_questions():
+    """Stream job events via Server-Sent Events (SSE)-style text/event-stream.
+    This endpoint enqueues the same background job and then streams status updates
+    and the final result as JSON in 'data:' SSE events. The frontend can connect
+    and read events without busy-polling.
+    """
+    data = request.get_json(silent=True) or {}
+
+    # Guard: in production require Redis (no in-process fallback)
+    guard_resp = _redis_required_guard()
+    if guard_resp:
+        return guard_resp
+
+    # Create or enqueue job (reuse the same logic as generate_questions_job)
+    if use_redis_queue and rq_queue is not None:
+        try:
+            job = rq_queue.enqueue('app.routes.interview.run_generate_questions_job', data)
+            job_id = job.get_id()
+        except Exception as exc:
+            logger.exception('Failed to enqueue streaming generate_questions job to Redis: %s', exc)
+            job_id = None
+    else:
         job_id = str(uuid4())
-        job_record = {
-            'status': 'pending',
-            'result': None,
-            'error': None,
-            'started_at': datetime.utcnow().isoformat(),
-            'completed_at': None,
-        }
+        job_record = {'status': 'pending', 'result': None, 'error': None, 'started_at': datetime.utcnow().isoformat(), 'completed_at': None}
         with jobs_lock:
             jobs[job_id] = job_record
-
-        def _run_local_job(job_id_local, payload):
+        def _run_local_job_stream(job_id_local, payload):
             result = run_generate_questions_job(payload)
             with jobs_lock:
                 if result.get('status') == 'completed':
@@ -294,13 +361,20 @@ def generate_questions_job():
                     jobs[job_id_local]['status'] = 'failed'
                     jobs[job_id_local]['error'] = result.get('error')
                 jobs[job_id_local]['completed_at'] = datetime.utcnow().isoformat()
+        Thread(target=_run_local_job_stream, args=(job_id, data), daemon=True).start()
 
-        thread = Thread(target=_run_local_job, args=(job_id, data), daemon=True)
-        thread.start()
+    # Now stream job status events until completion or timeout
+    from app.routes._stream_helpers import sse_event, poll_job_and_stream
 
-        response = jsonify({'job_id': job_id})
-        response.status_code = 202
-        return response
+    @stream_with_context
+    def event_stream():
+        # Immediately tell the client we've started and provide job_id
+        yield sse_event({'status': 'started', 'job_id': job_id})
+        # Poll job status and yield events
+        for chunk in poll_job_and_stream(job_id, timeout_seconds=max(60, int(Config.STREAM_TIMEOUT_SECONDS or 60))):
+            yield chunk
+        # Close
+    return Response(event_stream(), mimetype='text/event-stream')
 
 
 @interview_bp.route('/job/<job_id>', methods=['GET'])
@@ -471,25 +545,78 @@ def analyze_answer():
 @token_required
 @limiter.limit("20 per minute")
 def analyze_answer_job():
-        """Start a background job to analyze an answer and return a job_id. Client polls /api/interview/job/<job_id>"""
-        data = request.get_json(silent=True) or {}
+    """Start a background job to analyze an answer and return a job_id. Client polls /api/interview/job/<job_id>"""
+    # Guard: do not allow in-process fallback in production
+    guard_resp = _redis_required_guard()
+    if guard_resp:
+        return guard_resp
 
-        if use_redis_queue and rq_queue is not None:
-            try:
-                job = rq_queue.enqueue('app.routes.interview.run_analyze_answer_job', data)
-                response = jsonify({'job_id': job.get_id()})
-                response.status_code = 202
-                return response
-            except Exception as exc:
-                logger.exception('Failed to enqueue analyze_answer job to Redis: %s', exc)
-                # Fall back to in-process job creation
+    data = request.get_json(silent=True) or {}
 
+    if use_redis_queue and rq_queue is not None:
+        try:
+            job = rq_queue.enqueue('app.routes.interview.run_analyze_answer_job', data)
+            response = jsonify({'job_id': job.get_id()})
+            response.status_code = 202
+            return response
+        except Exception as exc:
+            logger.exception('Failed to enqueue analyze_answer job to Redis: %s', exc)
+            # Fall back to in-process job creation
+
+    job_id = str(uuid4())
+    job_record = {'status': 'pending', 'result': None, 'error': None, 'started_at': datetime.utcnow().isoformat(), 'completed_at': None}
+    with jobs_lock:
+        jobs[job_id] = job_record
+
+    def _run_local_analysis(job_id_local, payload):
+        result = run_analyze_answer_job(payload)
+        with jobs_lock:
+            if result.get('status') == 'completed':
+                jobs[job_id_local]['status'] = 'completed'
+                jobs[job_id_local]['result'] = result.get('result')
+            else:
+                jobs[job_id_local]['status'] = 'failed'
+                jobs[job_id_local]['error'] = result.get('error')
+            jobs[job_id_local]['completed_at'] = datetime.utcnow().isoformat()
+
+    thread = Thread(target=_run_local_analysis, args=(job_id, data), daemon=True)
+    thread.start()
+
+    response = jsonify({'job_id': job_id})
+    response.status_code = 202
+    return response
+
+
+@interview_bp.route('/stream/analyze-answer', methods=['POST'])
+@token_required
+@limiter.limit("20 per minute")
+def stream_analyze_answer():
+    """Stream analysis job events via SSE-style text/event-stream.
+    Enqueue or start a background analyze job and stream status updates and the
+    final result as JSON 'data' events.
+    """
+    data = request.get_json(silent=True) or {}
+
+    # Guard: in production require Redis (no in-process fallback)
+    guard_resp = _redis_required_guard()
+    if guard_resp:
+        return guard_resp
+
+    # Enqueue to Redis RQ if available
+    if use_redis_queue and rq_queue is not None:
+        try:
+            job = rq_queue.enqueue('app.routes.interview.run_analyze_answer_job', data)
+            job_id = job.get_id()
+        except Exception as exc:
+            logger.exception('Failed to enqueue streaming analyze job to Redis: %s', exc)
+            job_id = None
+    else:
         job_id = str(uuid4())
         job_record = {'status': 'pending', 'result': None, 'error': None, 'started_at': datetime.utcnow().isoformat(), 'completed_at': None}
         with jobs_lock:
             jobs[job_id] = job_record
 
-        def _run_local_analysis(job_id_local, payload):
+        def _run_local_analysis_stream(job_id_local, payload):
             result = run_analyze_answer_job(payload)
             with jobs_lock:
                 if result.get('status') == 'completed':
@@ -500,12 +627,17 @@ def analyze_answer_job():
                     jobs[job_id_local]['error'] = result.get('error')
                 jobs[job_id_local]['completed_at'] = datetime.utcnow().isoformat()
 
-        thread = Thread(target=_run_local_analysis, args=(job_id, data), daemon=True)
-        thread.start()
+        Thread(target=_run_local_analysis_stream, args=(job_id, data), daemon=True).start()
 
-        response = jsonify({'job_id': job_id})
-        response.status_code = 202
-        return response
+    from app.routes._stream_helpers import sse_event, poll_job_and_stream
+
+    @stream_with_context
+    def event_stream():
+        yield sse_event({'status': 'started', 'job_id': job_id})
+        for chunk in poll_job_and_stream(job_id, timeout_seconds=max(60, int(Config.STREAM_TIMEOUT_SECONDS or 60))):
+            yield chunk
+
+    return Response(event_stream(), mimetype='text/event-stream')
 
 
 @interview_bp.route('/get-feedback/<session_id>', methods=['GET'])
