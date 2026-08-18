@@ -266,55 +266,71 @@ class GeminiService:
             return self.get_fallback_questions(job_role, category, num_questions)
 
         start = time.time()
-        try:
-            timeout_seconds = max(float(Config.GEMINI_TIMEOUT_SECONDS), 5.0)
-            text = self.run_with_timeout(
-                self._generate_json,
-                timeout_seconds,
-                prompt,
-                2048,
-            )
-            elapsed = time.time() - start
-            logger.info('GeminiService.generate_questions: got response in %.2fs; text_len=%d', elapsed, len(text))
-            if not text:
-                logger.warning('GeminiService.generate_questions: empty text, using fallback')
+        # Retry logic for question generation similar to analyze_answer
+        retries = int(getattr(Config, 'GEMINI_RETRIES', 1))
+        attempt = 0
+        last_exc = None
+        while attempt <= retries:
+            attempt += 1
+            try:
+                timeout_seconds = max(float(Config.GEMINI_TIMEOUT_SECONDS), 5.0)
+                text = self.run_with_timeout(
+                    self._generate_json,
+                    timeout_seconds,
+                    prompt,
+                    2048,
+                )
+                elapsed = time.time() - start
+                logger.info('GeminiService.generate_questions: got response in %.2fs; text_len=%d (attempt %d)', elapsed, len(text), attempt)
+                if not text:
+                    logger.warning('GeminiService.generate_questions: empty text, using fallback (attempt %d)', attempt)
+                    last_exc = ValueError('Empty response from Gemini')
+                    raise last_exc
+                questions = self._parse_json_response(text)
+                if not isinstance(questions, list):
+                    raise ValueError('Gemini returned questions in an invalid format')
+
+                # Gemini can return syntactically valid JSON that does not match
+                # the requested schema (for example, a list of strings or fewer
+                # items than requested). Validate it here so the route never
+                # calls `.get()` on an invalid item and returns a 500 response.
+                normalized_questions = []
+                for question in questions:
+                    if not isinstance(question, dict):
+                        raise ValueError('Gemini returned a question in an invalid format')
+
+                    question_text = question.get('question')
+                    if not isinstance(question_text, str) or not question_text.strip():
+                        raise ValueError('Gemini returned a question without text')
+
+                    expected_answer = question.get('expected_answer', '')
+                    normalized_questions.append({
+                        'question': question_text.strip(),
+                        'expected_answer': (
+                            expected_answer.strip()
+                            if isinstance(expected_answer, str)
+                            else str(expected_answer)
+                        ),
+                    })
+
+                if len(normalized_questions) < num_questions:
+                    raise ValueError('Gemini returned fewer questions than requested')
+
+                return normalized_questions[:num_questions]
+            except Exception as exc:
+                elapsed = time.time() - start
+                logger.exception('Error generating questions (%.2fs) on attempt %d: %s', elapsed, attempt, exc)
+                self.last_error = str(exc)
+                last_exc = exc
+                if attempt <= retries:
+                    backoff = min(2 ** (attempt - 1), 8)
+                    logger.info('Retrying generate_questions after %ds (attempt %d of %d)', backoff, attempt, retries)
+                    try:
+                        time.sleep(backoff)
+                    except Exception:
+                        pass
+                    continue
                 return self.get_fallback_questions(job_role, category, num_questions)
-            questions = self._parse_json_response(text)
-            if not isinstance(questions, list):
-                raise ValueError('Gemini returned questions in an invalid format')
-
-            # Gemini can return syntactically valid JSON that does not match
-            # the requested schema (for example, a list of strings or fewer
-            # items than requested). Validate it here so the route never
-            # calls `.get()` on an invalid item and returns a 500 response.
-            normalized_questions = []
-            for question in questions:
-                if not isinstance(question, dict):
-                    raise ValueError('Gemini returned a question in an invalid format')
-
-                question_text = question.get('question')
-                if not isinstance(question_text, str) or not question_text.strip():
-                    raise ValueError('Gemini returned a question without text')
-
-                expected_answer = question.get('expected_answer', '')
-                normalized_questions.append({
-                    'question': question_text.strip(),
-                    'expected_answer': (
-                        expected_answer.strip()
-                        if isinstance(expected_answer, str)
-                        else str(expected_answer)
-                    ),
-                })
-
-            if len(normalized_questions) < num_questions:
-                raise ValueError('Gemini returned fewer questions than requested')
-
-            return normalized_questions[:num_questions]
-        except Exception as exc:
-            elapsed = time.time() - start
-            logger.exception('Error generating questions (%.2fs): %s', elapsed, exc)
-            self.last_error = str(exc)
-            return self.get_fallback_questions(job_role, category, num_questions)
 
     def analyze_answer(self, question, user_answer, expected_answer, is_premium=False):
         # Premium users get more detailed coaching
@@ -359,28 +375,47 @@ class GeminiService:
             return self.get_fallback_feedback(is_premium=is_premium, user_answer=user_answer, expected_answer=expected_answer)
 
         start = time.time()
-        try:
-            timeout_seconds = max(float(Config.GEMINI_TIMEOUT_SECONDS), 5.0)
-            text = self.run_with_timeout(
-                self._generate_json,
-                timeout_seconds,
-                prompt,
-                2048 if is_premium else 1024,
-            )
-            elapsed = time.time() - start
-            logger.info('GeminiService.analyze_answer: got response in %.2fs; text_len=%d', elapsed, len(text))
-            if not text:
-                logger.warning('GeminiService.analyze_answer: empty text, using fallback')
+        # Number of retry attempts (extra attempts beyond the first). Default: 1 retry
+        retries = int(getattr(Config, 'GEMINI_RETRIES', 1))
+        attempt = 0
+        last_exc = None
+        while attempt <= retries:
+            attempt += 1
+            try:
+                timeout_seconds = max(float(Config.GEMINI_TIMEOUT_SECONDS), 5.0)
+                text = self.run_with_timeout(
+                    self._generate_json,
+                    timeout_seconds,
+                    prompt,
+                    2048 if is_premium else 1024,
+                )
+                elapsed = time.time() - start
+                logger.info('GeminiService.analyze_answer: got response in %.2fs; text_len=%d (attempt %d)', elapsed, len(text), attempt)
+                if not text:
+                    logger.warning('GeminiService.analyze_answer: empty text, using fallback (attempt %d)', attempt)
+                    last_exc = ValueError('Empty response from Gemini')
+                    # allow retry
+                    raise last_exc
+                feedback = self._parse_json_response(text)
+                if not isinstance(feedback, dict):
+                    raise ValueError('Gemini returned feedback in an invalid format')
+                return feedback
+            except Exception as exc:
+                elapsed = time.time() - start
+                logger.exception('Error analyzing answer (%.2fs) on attempt %d: %s', elapsed, attempt, exc)
+                self.last_error = str(exc)
+                last_exc = exc
+                # If we'll retry, sleep with backoff
+                if attempt <= retries:
+                    backoff = min(2 ** (attempt - 1), 8)
+                    logger.info('Retrying analyze_answer after %ds (attempt %d of %d)', backoff, attempt, retries)
+                    try:
+                        time.sleep(backoff)
+                    except Exception:
+                        pass
+                    continue
+                # No more retries; fall back
                 return self.get_fallback_feedback(is_premium=is_premium, user_answer=user_answer, expected_answer=expected_answer)
-            feedback = self._parse_json_response(text)
-            if not isinstance(feedback, dict):
-                raise ValueError('Gemini returned feedback in an invalid format')
-            return feedback
-        except Exception as exc:
-            elapsed = time.time() - start
-            logger.exception('Error analyzing answer (%.2fs): %s', elapsed, exc)
-            self.last_error = str(exc)
-            return self.get_fallback_feedback(is_premium=is_premium, user_answer=user_answer, expected_answer=expected_answer)
 
     def get_fallback_questions(self, job_role, category, num_questions=5):
         job_key = (job_role or '').lower().replace(' ', '_')

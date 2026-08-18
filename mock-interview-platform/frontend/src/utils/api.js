@@ -631,61 +631,75 @@ export const getQuestions = async (params, options = {}) => {
 };
 
 export const submitAnswer = async (data, options = {}) => {
-  // Prefer job-based analysis to avoid blocking synchronous requests and to
-  // make long-running provider calls robust against request timeouts.
-  try {
-    const result = await createJobAndPoll('/api/interview/analyze-answer-job', '/api/interview/job', data, REQUEST_TIMEOUTS.interviewAnalysis * 2, { signal: options.signal, maxPollDuration: REQUEST_TIMEOUTS.interviewAnalysis * 2 });
-    return result;
-  } catch (jobErr) {
-    // If Redis is required but not configured, surface actionable message
-    if (jobErr && jobErr.isRedisRequired) {
-      logApiError('/api/interview/analyze-answer-job', jobErr);
-      return { error: 'Background jobs unavailable', details: jobErr.message || 'Server requires Redis to process analysis jobs.' };
-    }
+  // Use synchronous analysis endpoint directly (no Redis/RQ or polling).
+  // Implement small retry/backoff to handle transient provider/backend issues.
+  const maxAttempts = 2;
+  let attempt = 0;
+  let lastError = null;
+  let timeout = REQUEST_TIMEOUTS.interviewAnalysis * 2; // generous timeout for provider calls
 
-    // If the job failure was caused by a socket/proxy reset, log and attempt an
-    // immediate synchronous fallback with an extended timeout. This is a
-    // pragmatic mitigation against hosting proxies that abruptly close long
-    // connections (e.g., Render/Vercel reverse proxy timeouts).
-    const fallbackTimeout = jobErr && jobErr.isSocketHangUp ? Math.max(REQUEST_TIMEOUTS.interviewAnalysis * 2, 120_000) : REQUEST_TIMEOUTS.interviewAnalysis * 2;
-
-    logApiError('/api/interview/analyze-answer-job', jobErr || new Error('Job creation/polling failed'));
-
-    // Attempt synchronous fallback (best-effort) with a single retry on timeout
+  while (attempt < maxAttempts) {
+    attempt += 1;
     try {
-      const response = await api.post('/api/interview/analyze-answer', data, { timeout: fallbackTimeout, validateStatus: (s) => s < 500, signal: options.signal });
-      if (response.status === 200) return response.data;
-      // If it returned 202 with a job_id, poll that job as well
-      if (response.status === 202 && response.data?.job_id) {
-        const jobId = response.data.job_id;
-        const pollResult = await createJobAndPoll('/api/interview/analyze-answer-job', '/api/interview/job', data, REQUEST_TIMEOUTS.interviewAnalysis * 2, { signal: options.signal, maxPollDuration: REQUEST_TIMEOUTS.interviewAnalysis * 2 });
-        return pollResult;
-      }
-    } catch (syncErr) {
-      // If aborted, rethrow
-      if (syncErr && (syncErr.name === 'AbortError' || syncErr.code === 'ERR_CANCELED')) throw syncErr;
-      logApiError('/api/interview/analyze-answer (fallback)', syncErr || new Error('Fallback failed'));
+      const response = await api.post('/api/interview/analyze-answer', data, {
+        timeout,
+        validateStatus: (s) => s < 500,
+        signal: options.signal,
+      });
 
-      const isTimeout = syncErr?.code === 'ECONNABORTED' || syncErr?.message?.toLowerCase?.().includes('timeout');
+      // Expect 200 with analysis result. If server returns 202 with job_id, the
+      // backend still intends async processing; treat that as an error because
+      // we're removing job/polling from the client. Surface a clear message.
+      if (response.status === 200) return response.data;
+      if (response.status === 202 && response.data?.job_id) {
+        // Server is returning job-based flow; log it and return a helpful error
+        const out = new Error('Server returned job-based response but client is configured for synchronous analysis. Configure server for direct analysis or enable background workers.');
+        out.status = 202;
+        out.job_id = response.data.job_id;
+        throw out;
+      }
+
+      lastError = new Error('Unexpected response from analyze-answer');
+      break;
+    } catch (err) {
+      lastError = err;
+      // If aborted by caller, propagate immediately
+      if (err && (err.name === 'AbortError' || err.code === 'ERR_CANCELED' || err.name === 'CanceledError')) throw err;
+
+      const isTimeout = err?.code === 'ECONNABORTED' || err?.message?.toLowerCase?.().includes('timeout');
+      const isNetwork = !err?.response;
+
+      // For transient timeouts/network errors, retry once with backoff
+      if ((isTimeout || isNetwork) && attempt < maxAttempts) {
+        const backoffMs = 1000 * Math.pow(2, attempt - 1);
+        console.warn(`submitAnswer attempt ${attempt} failed; retrying after ${backoffMs}ms.`, err?.message || err);
+        await new Promise((res) => setTimeout(res, backoffMs));
+        // increase timeout for second attempt
+        timeout = Math.min(timeout * 2, 180_000);
+        continue;
+      }
+
+      // Non-retriable or final failure: log structured error and map to friendly object
+      logApiError('/api/interview/analyze-answer', err);
+
+      // Map common cases to structured responses callers can use
       if (isTimeout) {
         return { error: 'Analysis timed out', details: 'The analysis service is taking too long. Try again later or shorten the response.' };
       }
-
-      const status = syncErr?.response?.status;
-      if (status && status >= 500) {
-        return { error: 'Server error', details: syncErr?.message || 'The analysis service encountered an internal error.' , status };
+      if (err?.response && err.response.status >= 500) {
+        return { error: 'Server error', details: err?.message || 'The analysis service encountered an internal error.', status: err.response.status };
+      }
+      if (!err?.response) {
+        return { error: 'Network error', details: err?.message || 'Could not reach analysis service' };
       }
 
-      if (!syncErr?.response) {
-        return { error: 'Failed to reach analysis service', details: syncErr?.message || 'Network error' };
-      }
-
-      return { error: syncErr?.response?.data?.error || 'Request failed', details: syncErr?.response?.data?.details || syncErr?.message || 'Request failed', status: status || null };
+      return { error: err?.response?.data?.error || 'Request failed', details: err?.response?.data?.details || err?.message || 'Request failed', status: err?.response?.status || null };
     }
-
-    // As a last resort, return a generic failure
-    return { error: 'Analysis failed', details: jobErr?.message || 'Background job and fallback both failed' };
   }
+
+  // If we exit loop, return the last error mapped
+  logApiError('/api/interview/analyze-answer', lastError || new Error('Unknown error'));
+  return { error: 'Analysis failed', details: lastError?.message || 'Unknown error' };
 };
 
 export const getFeedback = async (sessionId) => {

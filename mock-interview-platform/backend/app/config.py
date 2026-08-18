@@ -78,6 +78,8 @@ class Config:
     # Keep interactive endpoints responsive when the external AI provider is
     # slow or unreachable; the service supplies local fallback responses.
     GEMINI_TIMEOUT_SECONDS = float(os.getenv('GEMINI_TIMEOUT_SECONDS', '10'))
+    # Number of retries to attempt for Gemini provider calls (retries on timeout/network errors)
+    GEMINI_RETRIES = int(os.getenv('GEMINI_RETRIES', '1'))
 
     # Require Redis in production to avoid in-process threaded fallbacks that
     # are unsafe on serverless or multi-worker deployments. Set to 'false' to

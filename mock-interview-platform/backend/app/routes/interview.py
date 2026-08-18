@@ -72,6 +72,10 @@ except Exception:
     rq_queue = None
     use_redis_queue = False
 
+# Force-disable Redis/RQ in this deployment to use synchronous processing only.
+# This prevents enqueueing jobs and requires the analyze endpoints to run inline.
+use_redis_queue = False
+
 # In-process fallback job store (used when Redis is not configured)
 jobs = {}
 from threading import Thread, Lock
@@ -731,53 +735,32 @@ def analyze_answer():
 @token_required
 @limiter.limit("20 per minute")
 def analyze_answer_job():
-    """Start a background job to analyze an answer and return a job_id. Client polls /api/interview/job/<job_id>"""
-    # Guard: do not allow in-process fallback in production
-    guard_resp = _redis_required_guard()
-    if guard_resp:
-        return guard_resp
+    """Run analysis synchronously and return the result. Redis/RQ is disabled in this deployment.
 
+    This endpoint previously enqueued background jobs and returned a 202 with job_id.
+    To simplify the stack and honor the client's request to remove polling/Redis, we
+    now execute run_analyze_answer_job inline and return the completed result.
+    """
     data = request.get_json(silent=True) or {}
 
-    # Basic payload validation to avoid enqueuing empty jobs that will fail
+    # Basic payload validation
     question = data.get('question')
     answer = (data.get('answer') or '').strip()
     if not question or not answer:
-        logger.warning('analyze_answer_job rejected: missing question or answer', extra={'req_id': str(uuid4())})
+        logger.warning('analyze_answer_job rejected: missing question or answer')
         return jsonify({'error': 'Missing required fields: question and answer'}), 400
 
-    if use_redis_queue and rq_queue is not None:
-        try:
-            job = rq_queue.enqueue('app.routes.interview.run_analyze_answer_job', data)
-            response = jsonify({'job_id': job.get_id(), 'req_id': str(uuid4())})
-            response.status_code = 202
-            return response
-        except Exception as exc:
-            logger.exception('Failed to enqueue analyze_answer job to Redis: %s', exc)
-            # Fall back to in-process job creation
-
-    job_id = str(uuid4())
-    job_record = {'status': 'pending', 'result': None, 'error': None, 'started_at': datetime.utcnow().isoformat(), 'completed_at': None}
-    with jobs_lock:
-        jobs[job_id] = job_record
-
-    def _run_local_analysis(job_id_local, payload):
-        result = run_analyze_answer_job(payload)
-        with jobs_lock:
-            if result.get('status') == 'completed':
-                jobs[job_id_local]['status'] = 'completed'
-                jobs[job_id_local]['result'] = result.get('result')
-            else:
-                jobs[job_id_local]['status'] = 'failed'
-                jobs[job_id_local]['error'] = result.get('error')
-            jobs[job_id_local]['completed_at'] = datetime.utcnow().isoformat()
-
-    thread = Thread(target=_run_local_analysis, args=(job_id, data), daemon=True)
-    thread.start()
-
-    response = jsonify({'job_id': job_id, 'req_id': str(uuid4())})
-    response.status_code = 202
-    return response
+    try:
+        # Execute the same job function synchronously and return its result.
+        result = run_analyze_answer_job(data)
+        if result.get('status') == 'completed':
+            return jsonify({'status': 'completed', 'result': result.get('result')}), 200
+        else:
+            logger.warning('Synchronous analyze job failed: %s', result.get('error'))
+            return jsonify({'status': 'failed', 'error': result.get('error')}), 200
+    except Exception as exc:
+        logger.exception('Synchronous analyze-answer-job handler failed: %s', exc)
+        return jsonify({'error': 'Internal server error while analyzing answer'}), 500
 
 
 @interview_bp.route('/stream/analyze-answer', methods=['POST'])
