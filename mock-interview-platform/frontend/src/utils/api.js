@@ -716,21 +716,38 @@ export const saveResponse = async (data) => {
   return response.data;
 };
 
-// In-memory cache for dashboard stats to avoid rapid-fire requests (429)
+// In-memory cache + cooldown for dashboard stats to avoid rapid-fire requests (429)
 let _cachedDashboardStats = null;
 let _cachedDashboardTs = 0;
 const DASHBOARD_CACHE_TTL = 30_000; // 30 seconds
+let _dashboardCooldownUntil = 0; // ms timestamp when we can resume requests after a 429
 
 export const getDashboardStats = async (options = { forceRefresh: false }) => {
   try {
     const now = Date.now();
+
+    // If we are currently in a cooldown window (due to recent 429), return cached or guest fallback
+    if (now < _dashboardCooldownUntil) {
+      console.warn('Dashboard stats request suppressed due to upstream rate limit until', new Date(_dashboardCooldownUntil).toISOString());
+      if (_cachedDashboardStats && (now - _cachedDashboardTs) < (DASHBOARD_CACHE_TTL * 10)) {
+        // Return slightly stale cached data during cooldown
+        return _cachedDashboardStats;
+      }
+      // Provide graceful guest fallback if no cache present
+      return {
+        fallback: true,
+        stats: { interviews_completed: 0, average_score: 0, confidence_score: 0 },
+        recent_interviews: [],
+        rate_limited: true,
+      };
+    }
+
     if (!options?.forceRefresh && _cachedDashboardStats && (now - _cachedDashboardTs) < DASHBOARD_CACHE_TTL) {
       // Return cached payload to avoid hammering the backend (helps avoid 429)
       return _cachedDashboardStats;
     }
 
-    // Fetch fresh data from the backend (no automatic timestamp param)
-    // Retry once with a short timeout to avoid long blocking delays in the UI.
+    // Fetch fresh data from the backend with retries and exponential backoff
     const attemptTimeouts = [8000, REQUEST_TIMEOUTS.dashboardStats];
     let lastFetchError = null;
     let response = null;
@@ -740,7 +757,35 @@ export const getDashboardStats = async (options = { forceRefresh: false }) => {
         break; // success
       } catch (err) {
         lastFetchError = err;
+        const status = err?.response?.status;
         const isTimeout = err?.code === 'ECONNABORTED' || (err?.message || '').toLowerCase().includes('timeout');
+
+        // If rate limited, respect Retry-After header or back off for a sensible default
+        if (status === 429) {
+          try {
+            const ra = err.response?.headers?.['retry-after'] || err.response?.headers?.['x-rate-limit-reset'];
+            // retry-after may be seconds or a HTTP-date
+            let cooldownMs = 60_000; // default 60s
+            if (ra) {
+              const n = Number(ra);
+              if (!Number.isNaN(n)) {
+                cooldownMs = n * 1000;
+              } else {
+                // try parse HTTP-date
+                const dt = Date.parse(ra);
+                if (!Number.isNaN(dt)) cooldownMs = Math.max(0, dt - Date.now());
+              }
+            }
+            _dashboardCooldownUntil = Date.now() + cooldownMs;
+            console.warn(`getDashboardStats received 429 - backing off for ${Math.round(cooldownMs/1000)}s until ${new Date(_dashboardCooldownUntil).toISOString()}`);
+          } catch (e) {
+            _dashboardCooldownUntil = Date.now() + 60_000;
+            console.warn('getDashboardStats received 429 - backing off for 60s (default)');
+          }
+          // Don't retry further in this loop
+          break;
+        }
+
         console.warn(`getDashboardStats attempt ${i + 1} failed (timeout=${attemptTimeouts[i]}ms):`, isTimeout ? 'timeout' : err?.message || err);
         // brief backoff before retrying
         if (i < attemptTimeouts.length - 1) await new Promise((res) => setTimeout(res, 500 * Math.pow(2, i)));
@@ -756,30 +801,19 @@ export const getDashboardStats = async (options = { forceRefresh: false }) => {
     _cachedDashboardTs = Date.now();
     return response.data;
   } catch (error) {
-    // The backend may be temporarily offline during local startup or if the
-    // API container is unavailable. Fall back to the same guest dashboard data
-    // used by the server so the dashboard continues to render instead of
-    // surfacing a raw Axios "Network Error" in the browser console.
-    // Axios Error properties are non-enumerable, which TurboPack can render
-    // as `{}`. Build a plain object and preserve Axios' diagnostic payload so
-    // response and network failures remain distinguishable in DevTools.
-    const serializedError = typeof error?.toJSON === 'function'
-      ? error.toJSON()
-      : null;
+    // Build a plain object for logging; Axios Error properties are non-enumerable
+    const serializedError = typeof error?.toJSON === 'function' ? error.toJSON() : null;
+
+    // Try to sanitize headers if present
     const serializedHeaders = serializedError?.config?.headers;
     if (serializedHeaders && typeof serializedHeaders === 'object') {
       const safeHeaders = Object.fromEntries(
         Object.entries(serializedHeaders).map(([name, value]) => [
           name,
-          ['authorization', 'cookie', 'proxy-authorization', 'x-api-key'].includes(name.toLowerCase())
-            ? '[REDACTED]'
-            : value,
+          ['authorization', 'cookie', 'proxy-authorization', 'x-api-key'].includes(name.toLowerCase()) ? '[REDACTED]' : value,
         ]),
       );
-      serializedError.config = {
-        ...serializedError.config,
-        headers: safeHeaders,
-      };
+      serializedError.config = { ...serializedError.config, headers: safeHeaders };
     }
 
     const errorDetails = {
@@ -792,16 +826,16 @@ export const getDashboardStats = async (options = { forceRefresh: false }) => {
       url: error?.config?.url,
     };
 
-    // TurboPack and some devtools may show Error objects as "{}" because
-    // properties are non-enumerable. Stringify the plain object so the
-    // diagnostic is visible in all consoles (and avoid leaking auth headers).
-    // Avoid JSON.stringify which can throw on circular objects; log structured object instead.
     console.error('getDashboardStats error:', errorDetails);
+    if (serializedError) console.debug('getDashboardStats Axios error:', serializedError);
 
-    if (serializedError) {
-      console.debug('getDashboardStats Axios error:', serializedError);
+    // Handle rate limiting explicitly: return cached or a rate-limited fallback
+    if (error?.response?.status === 429) {
+      console.warn('Dashboard stats rate-limited by backend. Serving cached or rate_limited fallback.');
+      if (_cachedDashboardStats) return _cachedDashboardStats;
+      return { fallback: true, rate_limited: true, stats: { interviews_completed: 0, average_score: 0, confidence_score: 0 }, recent_interviews: [] };
     }
-    
+
     if (!error?.response) {
       console.warn('Dashboard stats API unavailable (network error), using guest fallback payload.', error?.message || error);
       return {
@@ -820,8 +854,7 @@ export const getDashboardStats = async (options = { forceRefresh: false }) => {
         ],
       };
     }
-    
-    // If we get a 5xx error, also return fallback to prevent dashboard from breaking
+
     if (error.response?.status >= 500) {
       console.warn('Dashboard stats API returned 5xx error, using guest fallback payload.');
       return {
@@ -840,7 +873,7 @@ export const getDashboardStats = async (options = { forceRefresh: false }) => {
         ],
       };
     }
-    
+
     throw error;
   }
 };
