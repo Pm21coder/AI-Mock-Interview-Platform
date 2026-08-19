@@ -58,9 +58,9 @@ logger = logging.getLogger(__name__)
 
 class GeminiService:
     DEFAULT_MODELS = (
+        'gemini-3.6-flash',      # Latest available model for the Google GenAI API
         'gemini-3.1-flash-lite', # Best quota availability for free tier
         'gemini-3.5-flash',      # Good quality fallback
-        'gemini-3.6-flash',      # Latest model (higher quota use)
         'gemini-flash-latest',   # Generic latest model fallback
     )
 
@@ -93,12 +93,12 @@ class GeminiService:
         """Normalize a Gemini model identifier."""
         name = (model_name or '').strip().replace('\\', '/')
         if not name:
-            return 'gemini-2.0-flash'
+            return 'gemini-3.6-flash'
         if name.startswith('models/'):
             name = name[len('models/'):]
         if name.startswith('model/'):
             name = name[len('model/'):]
-        return name or 'gemini-2.0-flash'
+        return name or 'gemini-3.6-flash'
 
     @classmethod
     def model_candidates(cls, configured_model=None):

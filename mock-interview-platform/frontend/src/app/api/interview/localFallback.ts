@@ -153,7 +153,7 @@ export async function handleLocalFallback(action: string | undefined, prompt: st
   }
 
   // Action routing
-  if (act === 'generate_questions' || act === 'generate_questions_job') {
+  if (act === 'generate_questions') {
     const role = params?.role || params?.job || undefined;
     const category = params?.category || params?.topic || 'technical';
     const difficulty = params?.difficulty || 'medium';

@@ -71,7 +71,7 @@ class Config:
     GOOGLE_GEMINI_API_KEY = os.getenv('GOOGLE_GEMINI_API_KEY', '')
     # Use a stable Gemini model name that is supported by both the legacy and
     # modern Google SDKs. Strip any legacy `models/` prefix before use.
-    GOOGLE_GEMINI_MODEL = os.getenv('GOOGLE_GEMINI_MODEL', 'gemini-2.0-flash')
+    GOOGLE_GEMINI_MODEL = os.getenv('GOOGLE_GEMINI_MODEL', 'gemini-3.6-flash')
     # By default prefer a generic HTTP LLM provider (e.g., Deepseek) over
     # the Google Gemini SDK for interview generation and analysis. Set
     # ENABLE_GEMINI=true only if you explicitly want to use Google Gemini.
@@ -81,11 +81,6 @@ class Config:
     GEMINI_TIMEOUT_SECONDS = float(os.getenv('GEMINI_TIMEOUT_SECONDS', '10'))
     # Number of retries to attempt for Gemini provider calls (retries on timeout/network errors)
     GEMINI_RETRIES = int(os.getenv('GEMINI_RETRIES', '1'))
-
-    # Require Redis in production to avoid in-process threaded fallbacks that
-    # are unsafe on serverless or multi-worker deployments. Set to 'false' to
-    # allow in-process fallback (useful only for local development).
-    REQUIRE_REDIS_IN_PRODUCTION = os.getenv('REQUIRE_REDIS_IN_PRODUCTION', 'true').lower() == 'true'
 
     # Razorpay Configuration
     RAZORPAY_KEY_ID = os.getenv('RAZORPAY_KEY_ID', '')

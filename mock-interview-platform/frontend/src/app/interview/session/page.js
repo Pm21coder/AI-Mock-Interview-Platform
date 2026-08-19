@@ -8,7 +8,7 @@ import QuestionDisplay from '../../../components/QuestionDisplay';
 import VideoRecorder from '../../../components/VideoRecorder';
 import FeedbackDisplay from '../../../components/FeedbackDisplay';
 import LimitErrorModal from '../../../components/LimitErrorModal';
-import { getQuestions, submitAnswer, getFeedback, isRedisRequiredError, parseRedisRequiredMessage } from '../../../utils/api';
+import { getQuestions, submitAnswer, getFeedback } from '../../../utils/api';
 import { invalidateSubscriptionCache } from '../../../hooks/useSubscription';
 
 function getSpeechErrorMessage(error) {
@@ -108,7 +108,13 @@ function SessionLoading() {
 
 function InterviewSessionContent() {
   const router = useRouter();
-  const params = useSearchParams();
+  const searchParams = useSearchParams();
+  const paramsKey = searchParams ? searchParams.toString() : null;
+  const jobRole = searchParams?.get('job_role') || 'Software Engineer';
+  const category = searchParams?.get('category') || 'technical';
+  const difficulty = searchParams?.get('difficulty') || 'medium';
+  const rawNum = Number(searchParams?.get('num_questions') || 5);
+  const numQuestions = Number.isFinite(rawNum) ? Math.min(Math.max(1, Math.floor(rawNum)), 10) : 5;
   const [questions, setQuestions] = useState([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isProcessing, setIsProcessing] = useState(false);
@@ -121,7 +127,6 @@ function InterviewSessionContent() {
   const [showLimitModal, setShowLimitModal] = useState(false);
   const [canUpgradeForLoadError, setCanUpgradeForLoadError] = useState(false);
   const [speechState, setSpeechState] = useState('checking');
-  const [redisRequiredMessage, setRedisRequiredMessage] = useState(null);
   const [speechMessage, setSpeechMessage] = useState('');
   const [timeElapsed, setTimeElapsed] = useState(0);
   const recognitionRef = useRef(null);
@@ -360,13 +365,6 @@ function InterviewSessionContent() {
     const controller = new AbortController();
     fetchControllerRef.current = controller;
 
-    const jobRole = params.get('job_role') || 'Software Engineer';
-    const category = params.get('category') || 'technical';
-    const difficulty = params.get('difficulty') || 'medium';
-    // Sanitize and clamp requested number of questions to backend limits (1-10)
-    const rawNum = Number(params.get('num_questions') || 5);
-    const numQuestions = Number.isFinite(rawNum) ? Math.min(Math.max(1, Math.floor(rawNum)), 10) : 5;
-
     setLoadError('');
     setCanUpgradeForLoadError(false);
 
@@ -419,17 +417,6 @@ function InterviewSessionContent() {
 
       const questionLoadError = getQuestionLoadError(error);
 
-      // Detect Redis-required misconfiguration and surface banner for admins/devs
-      try {
-        if (isRedisRequiredError(error)) {
-          const msg = parseRedisRequiredMessage(error) || 'Server requires Redis in production. Please set REDIS_URL and run the worker.';
-          setRedisRequiredMessage(msg);
-          console.error('Redis required by backend:', msg);
-        }
-      } catch (e) {
-        // ignore
-      }
-
       if (questionLoadError.errorCode === 'interview_limit_reached') {
         invalidateSubscriptionCache();
         router.replace('/subscription?upgrade_prompt=limit_reached');
@@ -464,11 +451,7 @@ function InterviewSessionContent() {
       setIsLoading(false);
       loadInProgressRef.current = false;
     }
-
-  // create a stable, simple dependency value for params to satisfy react-hooks lint rules
-  const paramsKey = params ? params.toString() : null;
-
-  }, [paramsKey, router]);
+  }, [jobRole, category, difficulty, numQuestions, router]);
 
   useEffect(() => {
     // call loadQuestions asynchronously to avoid synchronous setState inside effect
@@ -477,7 +460,7 @@ function InterviewSessionContent() {
     return () => {
       try { if (fetchControllerRef.current) fetchControllerRef.current.abort(); } catch (e) { /* ignore */ }
     };
-  }, [loadQuestions]);
+  }, [loadQuestions, paramsKey]);
 
   // Timer: starts when questions are loaded, resets on each question change
   useEffect(() => {
@@ -591,16 +574,6 @@ function InterviewSessionContent() {
       }
       setLoadError('');
     } catch (error) {
-      // If the backend indicates Redis is required in production, surface the admin banner
-      try {
-        if (isRedisRequiredError(error)) {
-          const msg = parseRedisRequiredMessage(error) || 'Server requires Redis in production. Please set REDIS_URL and run the worker.';
-          setRedisRequiredMessage(msg);
-        }
-      } catch (e) {
-        // ignore
-      }
-
       const errorMessage = error.response?.data?.error || error.message || 'Failed to analyze answer';
       const reqId = error.response?.data?.req_id || null;
       setLoadError(reqId ? `Error: ${errorMessage} (ref: ${reqId})` : `Error: ${errorMessage}`);
@@ -727,29 +700,6 @@ function InterviewSessionContent() {
           }
         }}
       />
-
-      {redisRequiredMessage && (
-        <div className="mb-4 rounded-lg bg-yellow-50 p-4 border border-yellow-200">
-          <div className="flex items-start justify-between">
-            <div className="flex items-start gap-3">
-              <span className="text-xl text-yellow-700">⚠️</span>
-              <div>
-                <p className="font-semibold text-yellow-900">Background job processing is not configured</p>
-                <p className="text-yellow-800 text-sm">{redisRequiredMessage}</p>
-                <p className="text-xs text-gray-600 mt-1">To resolve: set the REDIS_URL environment variable for the backend and start the worker process (see DEPLOYMENT_QUICK_REFERENCE.md).</p>
-              </div>
-            </div>
-            <div>
-              <button
-                onClick={() => setRedisRequiredMessage(null)}
-                className="ml-4 rounded bg-yellow-100 px-3 py-1 text-sm font-medium text-yellow-800 hover:bg-yellow-200"
-              >
-                Dismiss
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
       <div className="container mx-auto px-4 py-8">
         {/* Progress bar and timer */}
