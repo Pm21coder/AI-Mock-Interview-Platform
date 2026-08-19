@@ -522,11 +522,11 @@ def get_dashboard_stats():
 
             def _rebuild_async(u_id):
                 try:
-                    current_app.logger.info('Starting background dashboard rebuild', extra={'user_id': u_id})
+                    logger.info('Starting background dashboard rebuild user_id=%s', u_id)
                     dashboard_service.rebuild_from_interviews(u_id)
-                    current_app.logger.info('Background dashboard rebuild completed', extra={'user_id': u_id})
-                except Exception as e:
-                    current_app.logger.exception('Background dashboard rebuild failed', exc_info=e)
+                    logger.info('Background dashboard rebuild completed user_id=%s', u_id)
+                except Exception:
+                    logger.exception('Background dashboard rebuild failed for user_id=%s', u_id)
 
             from threading import Thread
             Thread(target=_rebuild_async, args=(user_id,), daemon=True).start()
@@ -541,11 +541,11 @@ def get_dashboard_stats():
             from threading import Thread
             def _rebuild_if_needed(u_id):
                 try:
-                    current_app.logger.info('Triggering background rebuild for missing history sync', extra={'user_id': u_id})
+                    logger.info('Triggering background rebuild for missing history sync user_id=%s', u_id)
                     dashboard_service.rebuild_from_interviews(u_id)
-                    current_app.logger.info('Background rebuild finished', extra={'user_id': u_id})
-                except Exception as e:
-                    current_app.logger.exception('Background rebuild failed', exc_info=e)
+                    logger.info('Background rebuild finished user_id=%s', u_id)
+                except Exception:
+                    logger.exception('Background rebuild failed for user_id=%s', u_id)
             Thread(target=_rebuild_if_needed, args=(user_id,), daemon=True).start()
 
         response_data = {
@@ -564,9 +564,8 @@ def get_dashboard_stats():
         return response
 
     except Exception as exc:
-        import logging
-        logger = logging.getLogger(__name__)
-        logger.error(f"Dashboard stats error for user {user_id}: {str(exc)}", exc_info=True)
+        route_logger = logging.getLogger(__name__)
+        route_logger.error(f"Dashboard stats error for user {user_id}: {str(exc)}", exc_info=True)
         return jsonify({
             'error': 'Unable to load dashboard data',
             'details': str(exc)

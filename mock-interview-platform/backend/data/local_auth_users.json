@@ -12,14 +12,14 @@
   },
   "new_cycle@example.com": {
     "email": "new_cycle@example.com",
-    "password_hash": "$2b$12$nkTto0M5qDdYvg7vVoECEusx.oCv9rQAt8H/oyxhgAZBQ0XfnIw4.",
-    "created_at": "2026-08-19 11:25:39.661274",
+    "password_hash": "$2b$12$LGROK1nvLq3Gb6QzhriK7ulk5Be489qfMC.omJzxJhAE07ZDu.I32",
+    "created_at": "2026-08-19 15:55:50.287302",
     "subscription_tier": "free",
     "subscription_status": "active",
-    "subscription_start_date": "2026-08-19 11:25:39.661274",
-    "subscription_end_date": "2026-09-18 11:25:39.661274",
+    "subscription_start_date": "2026-08-19 15:55:50.287302",
+    "subscription_end_date": "2026-09-18 15:55:50.287302",
     "interviews_used_this_month": 0,
-    "_id": "demo_9349e3a6-d8cb-434e-a80d-82c03314302f"
+    "_id": "demo_3067017c-23f2-45f2-9cf2-8166fac77253"
   },
   "e2e-test+1@example.com": {
     "email": "e2e-test+1@example.com",
@@ -42,5 +42,38 @@
     "subscription_end_date": "2026-09-16 20:03:34.708886",
     "interviews_used_this_month": 1,
     "_id": "demo_732a3cb0-47aa-4258-b700-aaa701f49a59"
+  },
+  "audit_user@example.com": {
+    "email": "audit_user@example.com",
+    "password_hash": "$2b$12$aihAk/wzsBzM/3cWzVIeL.ZIz1kIfzfZVeCRzDZ97QhMuhnGC/fpa",
+    "created_at": "2026-08-19 15:40:02.009892",
+    "subscription_tier": "free",
+    "subscription_status": "active",
+    "subscription_start_date": "2026-08-19 15:40:02.009892",
+    "subscription_end_date": "2026-09-18 15:40:02.009892",
+    "interviews_used_this_month": 0,
+    "_id": "demo_84a44857-d9bb-45e0-ad67-1d8c0b3a5769"
+  },
+  "audit_user2@example.com": {
+    "email": "audit_user2@example.com",
+    "password_hash": "$2b$12$6R0da.4aq5bCgW3pa.yx0uyNfsAfhlwRkiE6SpborjA5GDO6qc6im",
+    "created_at": "2026-08-19 15:41:13.072249",
+    "subscription_tier": "free",
+    "subscription_status": "active",
+    "subscription_start_date": "2026-08-19 15:41:13.072249",
+    "subscription_end_date": "2026-09-18 15:41:13.072249",
+    "interviews_used_this_month": 0,
+    "_id": "demo_30cc8c97-760d-404f-9c36-265afba807d1"
+  },
+  "audit_user3@example.com": {
+    "email": "audit_user3@example.com",
+    "password_hash": "$2b$12$aqit/0aoeuKTYnbTEwB9wuPFEaAHSkOtNZEVQReep3CtozyiVBIum",
+    "created_at": "2026-08-19 15:42:26.997874",
+    "subscription_tier": "free",
+    "subscription_status": "active",
+    "subscription_start_date": "2026-08-19 15:42:26.997874",
+    "subscription_end_date": "2026-09-18 15:42:26.997874",
+    "interviews_used_this_month": 0,
+    "_id": "demo_ef9ccdb8-2b4c-4647-8b4d-d2e5278be8eb"
   }
 }

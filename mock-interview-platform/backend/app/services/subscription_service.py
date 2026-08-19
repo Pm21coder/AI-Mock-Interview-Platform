@@ -73,6 +73,18 @@ class SubscriptionService:
         # for users actively taking interviews.
         self._status_cache = {}
         self._status_cache_ttl_seconds = getattr(Config, 'SUBSCRIPTION_STATUS_CACHE_TTL', 5)
+        self._category_cache = {}
+        self._category_cache_ttl_seconds = getattr(Config, 'QUESTION_CATEGORY_CACHE_TTL', 15)
+
+    def invalidate_cache(self, user_id):
+        """Clear cached subscription and category data for a user."""
+        if user_id is None:
+            self._status_cache.clear()
+            self._category_cache.clear()
+            return
+        key = str(user_id)
+        self._status_cache.pop(key, None)
+        self._category_cache.pop(key, None)
 
     # ========================
     # Core Subscription Methods
@@ -364,6 +376,7 @@ class SubscriptionService:
             fallback_subscription['interviews_used_this_month'] = (
                 fallback_subscription.get('interviews_used_this_month', 0) + 1
             )
+            self.invalidate_cache(user_id)
             return fallback_subscription['interviews_used_this_month']
 
         local_user = self._find_local_user(user_id)
@@ -380,6 +393,7 @@ class SubscriptionService:
             new_count = interviews_used + 1
             user_record['interviews_used_this_month'] = new_count
             self._save_local_user(email, user_record, users)
+            self.invalidate_cache(user_id)
 
             sub = self._get_local_user_subscription(user_id, email, user_record, users)
             remaining = sub['interviews_remaining']
@@ -396,6 +410,7 @@ class SubscriptionService:
             if result.matched_count > 0:
                 user = mongo.db.users.find_one({'_id': user_id})
                 new_count = user.get('interviews_used_this_month', 0)
+                self.invalidate_cache(user_id)
 
                 # Check if user is approaching limit
                 sub = self.get_user_subscription(user_id)
