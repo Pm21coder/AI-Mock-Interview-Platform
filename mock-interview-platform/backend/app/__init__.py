@@ -19,10 +19,19 @@ except Exception:
 mongo = PyMongo()
 socketio = SocketIO()
 compress = Compress()
-limiter = Limiter(
-    key_func=get_remote_address,
-    default_limits=["200 per day", "50 per hour"]
-)
+# Configure rate limiter storage via RATE_LIMIT_STORAGE_URI (e.g. redis://host:6379)
+rate_limit_storage = os.getenv('RATE_LIMIT_STORAGE_URI', None)
+if rate_limit_storage:
+    limiter = Limiter(
+        key_func=get_remote_address,
+        default_limits=["200 per day", "50 per hour"],
+        storage_uri=rate_limit_storage
+    )
+else:
+    limiter = Limiter(
+        key_func=get_remote_address,
+        default_limits=["200 per day", "50 per hour"]
+    )
 
 
 def _fallback_local_mongo_uri():
