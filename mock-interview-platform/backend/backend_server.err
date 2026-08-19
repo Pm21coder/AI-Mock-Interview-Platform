@@ -1,0 +1,15 @@
+C:\Users\dell\AppData\Local\Programs\Python\Python313\Lib\site-packages\flask_limiter\extension.py:333: UserWarning: Using the in-memory storage for tracking rate limits as no storage was explicitly specified. This is not recommended for production use. See: https://flask-limiter.readthedocs.io#configuring-a-storage-backend for documentation about configuring the storage backend.
+  warnings.warn(
+[2026-08-19 20:20:47,882] WARNING in __init__: MongoDB connection attempt failed for mongodb://admin:password123@localhost:27017/mock_interview?authSource=admin: Authentication failed., full error: {'ok': 0.0, 'errmsg': 'Authentication failed.', 'code': 18, 'codeName': 'AuthenticationFailed'}
+[2026-08-19 20:20:47,883] WARNING in __init__: \u26a0 MongoDB unavailable; starting in guest mode.
+[2026-08-19 20:20:47,883] INFO in __init__: TESTING environment detected: forcing MONGO_AVAILABLE=True for deterministic tests
+[2026-08-19 20:20:51,877] INFO in gemini_service: GeminiService: Initialized with new google.genai SDK
+[2026-08-19 20:20:53,390] INFO in gemini_service: GeminiService: Initialized with new google.genai SDK
+[2026-08-19 20:20:54,827] INFO in gemini_service: GeminiService: Initialized with new google.genai SDK
+[2026-08-19 20:20:54,834] INFO in __init__: Gemini startup status: {'available': True, 'last_error': None, 'model': 'gemini-3.6-flash', 'use_new_sdk': True}
+[2026-08-19 20:20:54,836] INFO in __init__: LLM provider configured: none
+WARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:5000
+ * Running on http://10.26.229.55:5000
+Press CTRL+C to quit

@@ -33,5 +33,15 @@
     ],
     "updated_at": "2026-08-17 08:46:18.748411",
     "history_synced_at": "2026-08-17 08:46:18.748411"
+  },
+  "demo_d8bf6177-ba55-4311-8854-fbb2ad21ed70": {
+    "user_id": "demo_d8bf6177-ba55-4311-8854-fbb2ad21ed70",
+    "interviews_completed": 0,
+    "average_score": 0,
+    "confidence_score": 0,
+    "total_responses": 0,
+    "recent_interviews": [],
+    "updated_at": "2026-08-19 15:12:35.057665",
+    "history_synced_at": "2026-08-19 15:12:35.057665"
   }
 }
