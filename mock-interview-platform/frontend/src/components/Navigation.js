@@ -24,6 +24,7 @@ export default function Navigation() {
   const router = useRouter();
   const { email, logout } = useAuth();
   const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [theme, setTheme] = useState('light');
 
   useEffect(() => {
@@ -51,6 +52,7 @@ export default function Navigation() {
     document.documentElement.classList.toggle('dark', nextTheme === 'dark');
     window.localStorage.setItem('theme-preference', nextTheme);
     window.dispatchEvent(new CustomEvent('theme-preference-changed'));
+    setIsSettingsOpen(false);
   }, []);
 
   const signOut = useCallback(() => {
@@ -104,24 +106,50 @@ export default function Navigation() {
           </div>
 
           <div className="hidden items-center gap-3 md:flex">
-            <div className={isDarkTheme ? 'flex items-center gap-1 rounded-full border border-white/10 bg-white/5 p-1' : 'flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 p-1'}>
-              {themeOptions.map((option) => (
-                <button
-                  key={option.key}
-                  type="button"
-                  onClick={() => applyTheme(option.key)}
-                  className={
-                    theme === option.key
-                      ? 'rounded-full bg-gradient-to-r from-blue-600 to-violet-600 px-2.5 py-1.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-white shadow-sm'
-                      : isDarkTheme
-                        ? 'rounded-full px-2.5 py-1.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-300 transition hover:bg-white/5'
-                        : 'rounded-full px-2.5 py-1.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-600 transition hover:bg-slate-100'
-                  }
-                  aria-label={`Set theme to ${option.label}`}
-                >
-                  {option.label}
-                </button>
-              ))}
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => setIsSettingsOpen((prev) => !prev)}
+                className={isDarkTheme
+                  ? 'inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-2 text-sm font-medium text-slate-200 transition hover:bg-white/10'
+                  : 'inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white/70 px-3 py-2 text-sm font-medium text-slate-700 shadow-sm transition hover:bg-white'}
+                aria-label="Open theme settings"
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-4 w-4" aria-hidden="true">
+                  <path d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 0 0 2.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 0 0 1.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 0 0-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 0 0-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 0 0-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 0 0-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 0 0 1.066-2.573c-.94-1.543.826-3.31 2.37-2.37a1.724 1.724 0 0 0 2.572-1.065Z" />
+                  <circle cx="12" cy="12" r="3" />
+                </svg>
+                <span>Settings</span>
+                <svg viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4" aria-hidden="true">
+                  <path fillRule="evenodd" d="M5.22 7.22a.75.75 0 0 1 1.06 0L10 10.94l3.72-3.72a.75.75 0 1 1 1.06 1.06l-4.25 4.25a.75.75 0 0 1-1.06 0L5.22 8.28a.75.75 0 0 1 0-1.06Z" clipRule="evenodd" />
+                </svg>
+              </button>
+
+              {isSettingsOpen && (
+                <div className={isDarkTheme
+                  ? 'absolute right-0 top-12 z-20 w-48 rounded-2xl border border-white/10 bg-slate-900/95 p-2 shadow-2xl shadow-slate-950/40 backdrop-blur-xl'
+                  : 'absolute right-0 top-12 z-20 w-48 rounded-2xl border border-slate-200 bg-white/90 p-2 shadow-xl shadow-slate-200/80 backdrop-blur-xl'}>
+                  {themeOptions.map((option) => (
+                    <button
+                      key={option.key}
+                      type="button"
+                      onClick={() => applyTheme(option.key)}
+                      className={theme === option.key
+                        ? 'flex w-full items-center justify-between rounded-xl bg-gradient-to-r from-blue-600 to-violet-600 px-3 py-2 text-left text-sm font-semibold text-white'
+                        : isDarkTheme
+                          ? 'flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-sm font-medium text-slate-200 transition hover:bg-white/5'
+                          : 'flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-sm font-medium text-slate-700 transition hover:bg-slate-100'}
+                    >
+                      <span>{option.label}</span>
+                      {theme === option.key && (
+                        <svg viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4" aria-hidden="true">
+                          <path fillRule="evenodd" d="M16.704 4.296a1 1 0 0 1 0 1.414l-7.071 7.071a1 1 0 0 1-1.414 0L3.296 8.89a1 1 0 1 1 1.414-1.414l3.636 3.636 6.364-6.364a1 1 0 0 1 1.414 0Z" clipRule="evenodd" />
+                        </svg>
+                      )}
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
 
             {email ? (
@@ -141,24 +169,44 @@ export default function Navigation() {
           </div>
 
           <div className="flex items-center gap-2 md:hidden">
-            <div className={isDarkTheme ? 'flex items-center gap-1 rounded-full border border-white/10 bg-white/5 p-1' : 'flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 p-1'}>
-              {themeOptions.slice(0, 2).map((option) => (
-                <button
-                  key={option.key}
-                  type="button"
-                  onClick={() => applyTheme(option.key)}
-                  className={
-                    theme === option.key
-                      ? 'rounded-full bg-gradient-to-r from-blue-600 to-violet-600 px-2 py-1 text-[9px] font-semibold uppercase tracking-[0.12em] text-white'
-                      : isDarkTheme
-                        ? 'rounded-full px-2 py-1 text-[9px] font-semibold uppercase tracking-[0.12em] text-slate-300'
-                        : 'rounded-full px-2 py-1 text-[9px] font-semibold uppercase tracking-[0.12em] text-slate-600'
-                  }
-                  aria-label={`Set theme to ${option.label}`}
-                >
-                  {option.label}
-                </button>
-              ))}
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => setIsSettingsOpen((prev) => !prev)}
+                className={isDarkTheme ? 'inline-flex h-10 w-10 items-center justify-center rounded-full border border-white/10 bg-white/5 text-slate-200 hover:bg-white/10' : 'inline-flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 bg-white/80 text-slate-700 hover:bg-white'}
+                aria-label="Open theme settings"
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-4 w-4" aria-hidden="true">
+                  <path d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 0 0 2.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 0 0 1.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 0 0-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 0 0-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 0 0-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 0 0-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 0 0 1.066-2.573c-.94-1.543.826-3.31 2.37-2.37a1.724 1.724 0 0 0 2.572-1.065Z" />
+                  <circle cx="12" cy="12" r="3" />
+                </svg>
+              </button>
+
+              {isSettingsOpen && (
+                <div className={isDarkTheme
+                  ? 'absolute right-0 top-12 z-20 w-40 rounded-2xl border border-white/10 bg-slate-900/95 p-2 shadow-2xl shadow-slate-950/40 backdrop-blur-xl'
+                  : 'absolute right-0 top-12 z-20 w-40 rounded-2xl border border-slate-200 bg-white/90 p-2 shadow-xl shadow-slate-200/80 backdrop-blur-xl'}>
+                  {themeOptions.map((option) => (
+                    <button
+                      key={option.key}
+                      type="button"
+                      onClick={() => applyTheme(option.key)}
+                      className={theme === option.key
+                        ? 'flex w-full items-center justify-between rounded-xl bg-gradient-to-r from-blue-600 to-violet-600 px-3 py-2 text-left text-xs font-semibold text-white'
+                        : isDarkTheme
+                          ? 'flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-xs font-medium text-slate-200 transition hover:bg-white/5'
+                          : 'flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-xs font-medium text-slate-700 transition hover:bg-slate-100'}
+                    >
+                      <span>{option.label}</span>
+                      {theme === option.key && (
+                        <svg viewBox="0 0 20 20" fill="currentColor" className="h-3.5 w-3.5" aria-hidden="true">
+                          <path fillRule="evenodd" d="M16.704 4.296a1 1 0 0 1 0 1.414l-7.071 7.071a1 1 0 0 1-1.414 0L3.296 8.89a1 1 0 1 1 1.414-1.414l3.636 3.636 6.364-6.364a1 1 0 0 1 1.414 0Z" clipRule="evenodd" />
+                        </svg>
+                      )}
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
 
             <button

@@ -75,11 +75,13 @@ export default function RootLayout({ children }) {
           __html: `
             (function() {
               try {
-                const savedTheme = localStorage.getItem('theme-preference');
-                const prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
-                const shouldUseDark = savedTheme === 'dark' || (!savedTheme && prefersDark);
-                document.documentElement.classList.toggle('dark', shouldUseDark);
+                const stored = localStorage.getItem('theme-preference');
+                const validThemes = ['light', 'dark', 'gradient-pink'];
+                const nextTheme = validThemes.includes(stored) ? stored : 'light';
+                document.documentElement.setAttribute('data-theme', nextTheme);
+                document.documentElement.classList.toggle('dark', nextTheme === 'dark');
               } catch (e) {
+                document.documentElement.setAttribute('data-theme', 'light');
                 document.documentElement.classList.remove('dark');
               }
             })();

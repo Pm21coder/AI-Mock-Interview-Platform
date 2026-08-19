@@ -3,15 +3,48 @@
 @tailwind utilities;
 
 :root {
-  --foreground-rgb: 15, 23, 42;
-  --background-start-rgb: 248, 250, 252;
-  --background-end-rgb: 255, 255, 255;
+  --foreground-rgb: 30, 41, 59;
+  --background-start-rgb: 243, 245, 248;
+  --background-end-rgb: 232, 236, 242;
   --primary: 37, 99, 232;
   --primary-hover: 29, 78, 216;
   --accent: 139, 92, 246;
   --success: 34, 197, 94;
   --warning: 245, 158, 66;
   --danger: 239, 68, 68;
+  --glass-bg: rgba(255, 255, 255, 0.6);
+  --glass-border: rgba(255, 255, 255, 0.8);
+  --bg-glow-teal: rgba(210, 235, 231, 0.9);
+  --bg-glow-pink: rgba(252, 226, 230, 0.8);
+  --bg-glow-blue: rgba(224, 235, 247, 0.9);
+  --surface: rgba(255, 255, 255, 0.7);
+}
+
+html[data-theme='light'] {
+  --foreground-rgb: 30, 41, 59;
+  --background-start-rgb: 243, 245, 248;
+  --background-end-rgb: 232, 236, 242;
+  --glass-bg: rgba(255, 255, 255, 0.6);
+  --glass-border: rgba(255, 255, 255, 0.8);
+  --bg-glow-teal: rgba(210, 235, 231, 0.9);
+  --bg-glow-pink: rgba(252, 226, 230, 0.8);
+  --bg-glow-blue: rgba(224, 235, 247, 0.9);
+  --surface: rgba(255, 255, 255, 0.7);
+}
+
+html[data-theme='dark'] {
+  --foreground-rgb: 226, 232, 240;
+  --background-start-rgb: 2, 6, 23;
+  --background-end-rgb: 15, 23, 42;
+  --primary: 96, 165, 250;
+  --primary-hover: 59, 130, 246;
+  --accent: 168, 85, 247;
+  --glass-bg: rgba(15, 23, 42, 0.72);
+  --glass-border: rgba(148, 163, 184, 0.2);
+  --bg-glow-teal: rgba(45, 212, 191, 0.18);
+  --bg-glow-pink: rgba(244, 114, 182, 0.16);
+  --bg-glow-blue: rgba(96, 165, 250, 0.18);
+  --surface: rgba(15, 23, 42, 0.72);
 }
 
 html[data-theme='gradient-pink'] {
@@ -21,6 +54,12 @@ html[data-theme='gradient-pink'] {
   --primary: 236, 72, 153;
   --primary-hover: 219, 39, 119;
   --accent: 168, 85, 247;
+  --glass-bg: rgba(255, 255, 255, 0.56);
+  --glass-border: rgba(255, 255, 255, 0.82);
+  --bg-glow-teal: rgba(153, 246, 228, 0.55);
+  --bg-glow-pink: rgba(251, 207, 232, 0.8);
+  --bg-glow-blue: rgba(191, 219, 254, 0.8);
+  --surface: rgba(255, 255, 255, 0.7);
 }
 
 @layer base {
@@ -31,6 +70,14 @@ html[data-theme='gradient-pink'] {
 
   html.dark {
     color-scheme: dark;
+  }
+
+  html[data-theme='dark'] body {
+    background:
+      radial-gradient(circle at top left, rgba(45, 212, 191, 0.18), transparent 24%),
+      radial-gradient(circle at bottom right, rgba(168, 85, 247, 0.14), transparent 28%),
+      linear-gradient(180deg, #020817 0%, #0f172a 45%, #111827 100%);
+    color: rgb(var(--foreground-rgb));
   }
 
   html[data-theme='gradient-pink'] body {
@@ -44,9 +91,10 @@ html[data-theme='gradient-pink'] {
   body {
     color: rgb(var(--foreground-rgb));
     background:
-      radial-gradient(circle at top left, rgba(59, 130, 246, 0.18), transparent 30%),
-      radial-gradient(circle at bottom right, rgba(168, 85, 247, 0.14), transparent 28%),
-      linear-gradient(180deg, #f8fbff 0%, #ffffff 30%, #f8fafc 100%);
+      radial-gradient(circle at top left, var(--bg-glow-teal), transparent 26%),
+      radial-gradient(circle at bottom right, var(--bg-glow-pink), transparent 28%),
+      radial-gradient(circle at center, var(--bg-glow-blue), transparent 34%),
+      linear-gradient(180deg, rgb(var(--background-start-rgb)) 0%, rgb(var(--background-end-rgb)) 100%);
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
     min-height: 100vh;
     text-rendering: optimizeLegibility;
