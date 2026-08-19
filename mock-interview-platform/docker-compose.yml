@@ -10,7 +10,7 @@ services:
       - mongodb_data:/data/db
     environment:
       MONGO_INITDB_ROOT_USERNAME: admin
-      MONGO_INITDB_ROOT_PASSWORD: password123
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_INITDB_ROOT_PASSWORD:-change-me}
 
   backend:
     build: ./backend
@@ -24,7 +24,9 @@ services:
       - GOOGLE_GEMINI_API_KEY=${GOOGLE_GEMINI_API_KEY:-demo-key}
       - JWT_SECRET_KEY=${JWT_SECRET_KEY:-demo-secret}
       - FLASK_DEBUG=True
-      - SECRET_KEY=M5x@R1kT8v!C3nQ7pL2dH9wZ4sF6yJ0bE8uI5oA1rG7cP3mN
+      - SECRET_KEY=${SECRET_KEY:-change-me}
+    env_file:
+      - .env
     volumes:
       - ./backend:/app
 
