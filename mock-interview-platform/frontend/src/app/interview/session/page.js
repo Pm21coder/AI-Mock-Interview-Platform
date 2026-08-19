@@ -464,10 +464,15 @@ function InterviewSessionContent() {
       setIsLoading(false);
       loadInProgressRef.current = false;
     }
-  }, [params?.toString(), router]);
+
+  // create a stable, simple dependency value for params to satisfy react-hooks lint rules
+  const paramsKey = params ? params.toString() : null;
+
+  }, [paramsKey, router]);
 
   useEffect(() => {
-    loadQuestions();
+    // call loadQuestions asynchronously to avoid synchronous setState inside effect
+    Promise.resolve().then(() => loadQuestions());
 
     return () => {
       try { if (fetchControllerRef.current) fetchControllerRef.current.abort(); } catch (e) { /* ignore */ }
