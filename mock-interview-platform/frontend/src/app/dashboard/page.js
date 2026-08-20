@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useSyncExternalStore } from 'react';
 import Navigation from '../../components/Navigation';
-import { getDashboardStats } from '../../utils/api';
+import { getDashboardStats, invalidateDashboardStatsCache } from '../../utils/api';
 import { useDisplayName } from '../../hooks/useAuth';
 import { useInterviewSync } from '../../hooks/useInterviewSync';
 import { onSocketEvent, emitSocketEvent } from '../../utils/socket';
@@ -18,11 +18,11 @@ export default function DashboardPage() {
   const [retrying, setRetrying] = useState(false);
   const username = useDisplayName();
 
-  const fetchDashboardData = useCallback(async () => {
+  const fetchDashboardData = useCallback(async (forceRefresh = false) => {
     try {
       setLoading(true);
       setRetrying(false);
-      const data = await getDashboardStats();
+      const data = await getDashboardStats({ forceRefresh });
       const payload = data?.stats ? data : (data?.data ? data.data : data);
       const fallbackState = Boolean(data?.fallback || payload?.fallback);
       setIsFallbackData(fallbackState);
@@ -74,17 +74,18 @@ export default function DashboardPage() {
   // Listen for interview completion events and refresh data
   useInterviewSync(() => {
     console.log('Interview completed, refreshing dashboard data...');
-    // Refresh dashboard data immediately when interview completes
-    fetchDashboardData();
+    invalidateDashboardStatsCache();
+    fetchDashboardData(true);
   });
 
   useEffect(() => {
     const needsFreshFetch = typeof window !== 'undefined' && window.sessionStorage.getItem('dashboard_refresh') === 'true';
     if (needsFreshFetch) {
+      invalidateDashboardStatsCache();
       window.sessionStorage.removeItem('dashboard_refresh');
     }
 
-    const initialFetch = setTimeout(fetchDashboardData, 0);
+    const initialFetch = setTimeout(() => fetchDashboardData(needsFreshFetch), 0);
     const interval = setInterval(fetchDashboardData, 60000); // Changed from 30s to 60s for better performance
 
     const handleDashboardUpdate = (data) => {

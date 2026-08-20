@@ -476,9 +476,19 @@ let _cachedDashboardTs = 0;
 const DASHBOARD_CACHE_TTL = 30_000; // 30 seconds
 let _dashboardCooldownUntil = 0; // ms timestamp when we can resume requests after a 429
 
+export function invalidateDashboardStatsCache() {
+  _cachedDashboardStats = null;
+  _cachedDashboardTs = 0;
+  _dashboardCooldownUntil = 0;
+}
+
 export const getDashboardStats = async (options = { forceRefresh: false }) => {
   try {
     const now = Date.now();
+
+    if (options?.forceRefresh) {
+      invalidateDashboardStatsCache();
+    }
 
     // If we are currently in a cooldown window (due to recent 429), return cached or guest fallback
     if (now < _dashboardCooldownUntil) {
