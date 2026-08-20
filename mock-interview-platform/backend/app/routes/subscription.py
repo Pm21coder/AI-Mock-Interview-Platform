@@ -119,6 +119,7 @@ def get_plans():
 
 
 @subscription_bp.route('/status', methods=['GET'])
+@limiter.exempt
 @limiter.limit("60 per minute", key_func=_user_or_ip_key)
 @token_required
 def get_subscription_status():
