@@ -224,7 +224,23 @@ export function useSubscription() {
       void fetchSubscription();
     }, 0);
 
-    return () => window.clearTimeout(initialLoad);
+    // Listen for explicit local master-code activations so offline users get
+    // immediate subscription access without requiring a network call.
+    function onMasterCode() {
+      try {
+        const cached = getCachedSubscription(email);
+        if (cached) applySubscription(cached);
+      } catch (e) {
+        // ignore
+      }
+    }
+
+    window.addEventListener('app:master-code-applied', onMasterCode);
+
+    return () => {
+      window.clearTimeout(initialLoad);
+      window.removeEventListener('app:master-code-applied', onMasterCode);
+    };
   }, [applySubscription, email, fetchSubscription, isAuthenticated]);
 
   useEffect(() => {

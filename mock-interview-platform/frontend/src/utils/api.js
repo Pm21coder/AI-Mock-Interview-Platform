@@ -743,6 +743,49 @@ export const getResumeHistory = async () => {
   }
 };
 
+// Client-side master codes for offline activation. These mirror backend
+// fallback master_coupons.json entries and allow the UI to enable unlimited
+// subscription locally when the user provides a known master code while
+// offline. Entries here must match the backend for security when online.
+const MASTER_CODES = {
+  'MASTER-BASIC-E8E588F630E6E93F': { grant_unlimited: true, grant_tier: 'basic' },
+  'MASTER-PRO-16BAEA3245C7D44A': { grant_unlimited: true, grant_tier: 'pro' },
+};
+
+export function applyMasterCode(code) {
+  if (typeof window === 'undefined' || !code) return false;
+  const norm = String(code).trim().toUpperCase();
+  const info = MASTER_CODES[norm];
+  if (!info) return false;
+
+  try {
+    const accountEmail = window.localStorage.getItem('auth_email') || '__authenticated__';
+    const subscription = {
+      tier: info.grant_tier || 'basic',
+      status: 'active',
+      interviews_used_this_month: 0,
+      interviews_remaining: 'unlimited',
+      monthly_limit: 'unlimited',
+      features: [],
+      subscription_start_date: new Date().toISOString(),
+      subscription_end_date: null,
+      activated_via_master: true,
+    };
+    const payload = {
+      accountEmail,
+      data: subscription,
+      timestamp: Date.now(),
+    };
+    window.localStorage.setItem('subscription_data', JSON.stringify(payload));
+    // Notify other parts of the app to re-read subscription cache
+    try { window.dispatchEvent(new CustomEvent('app:master-code-applied', { detail: { code: norm, info } })); } catch (e) { window.dispatchEvent(new Event('app:master-code-applied')); }
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
+
 // Subscription API functions
 export const getSubscriptionStatus = async () => {
   const cacheKey = getCacheKey('GET', '/api/subscription/status');
