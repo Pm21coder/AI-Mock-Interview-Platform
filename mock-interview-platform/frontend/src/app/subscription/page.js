@@ -8,6 +8,7 @@ import { useSubscription } from '../../hooks/useSubscription';
 import {
   createRazorpayOrder,
   verifyRazorpayPayment,
+  validateCoupon,
 } from '../../utils/api';
 
 const RAZORPAY_SCRIPT_URL = 'https://checkout.razorpay.com/v1/checkout.js';
@@ -112,6 +113,10 @@ function SubscriptionPageContent() {
   const [upgradePrompt, setUpgradePrompt] = useState(null);
   const [processing, setProcessing] = useState(false);
   const [processingTier, setProcessingTier] = useState(null);
+  const [couponCode, setCouponCode] = useState('');
+  const [couponMessage, setCouponMessage] = useState(null);
+  const [couponApplying, setCouponApplying] = useState(false);
+  const [couponPreview, setCouponPreview] = useState(null);
 
   const refreshSubscription = useCallback(() => refetch(), [refetch]);
 
@@ -169,7 +174,7 @@ function SubscriptionPageContent() {
 
       let orderData;
       try {
-        orderData = await createRazorpayOrder({ tier });
+        orderData = await createRazorpayOrder({ tier, coupon_code: couponCode ? couponCode.trim() : undefined });
       } catch (orderError) {
         // If order creation fails with 400 (missing credentials), surface a clear error
         if (orderError.status === 400 && orderError.message?.toLowerCase?.().includes('not configured')) {
@@ -179,6 +184,15 @@ function SubscriptionPageContent() {
           setProcessingTier(null);
           return;
         }
+
+        // Coupon validation error - show inline message and stop processing
+        if (orderError.status === 400 && orderError.message?.toLowerCase?.().includes('coupon')) {
+          setCouponMessage(orderError.message || 'Invalid or expired coupon code');
+          setProcessing(false);
+          setProcessingTier(null);
+          return;
+        }
+
         throw orderError;
       }
 
@@ -406,7 +420,51 @@ function SubscriptionPageContent() {
           </div>
         )}
 
-        {/* Pricing Cards */}
+        {/* Coupon input */}
+          <div className="mb-6 flex items-center justify-center">
+         <div className="w-full max-w-2xl">
+           <label className="mb-2 block text-sm font-medium text-gray-700">Have a coupon code?</label>
+           <div className="flex gap-2">
+             <input
+               type="text"
+               value={couponCode}
+               onChange={(e) => { setCouponCode(e.target.value); setCouponMessage(null); }}
+               placeholder="Enter coupon code"
+               className="w-full rounded-lg border px-4 py-2 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
+             />
+             <button
+               onClick={async () => {
+                 try {
+                   setCouponApplying(true);
+                   setCouponMessage(null);
+                   setCouponPreview(null);
+                   const resp = await validateCoupon(couponCode.trim());
+                   if (resp && resp.coupon) {
+                     setCouponPreview(resp.coupon);
+                     setCouponMessage(`Coupon applied: ${resp.coupon.discount_percent}% off`);
+                   } else {
+                     setCouponMessage('Coupon looks invalid');
+                   }
+                 } catch (err) {
+                   setCouponMessage(err.message || 'Invalid or expired coupon code');
+                   setCouponPreview(null);
+                 } finally {
+                   setCouponApplying(false);
+                 }
+               }}
+               className={`rounded-lg px-4 py-2 font-medium ${couponApplying ? 'bg-gray-300' : 'bg-blue-600 text-white hover:bg-blue-700'}`}
+               disabled={couponApplying || !couponCode.trim()}
+             >
+               {couponApplying ? 'Checking...' : 'Apply'}
+             </button>
+           </div>
+           {couponMessage && (
+             <div className="mt-2 text-sm text-gray-700">{couponMessage}</div>
+           )}
+         </div>
+          </div>
+
+          {/* Pricing Cards */}
         <div className="grid gap-8 lg:grid-cols-3">
           {plans.map((plan) => (
             <div
@@ -429,6 +487,22 @@ function SubscriptionPageContent() {
                   <span className="text-4xl font-bold text-gray-900">{plan.priceInr}</span>
                   <span className="text-lg text-gray-600">/ {plan.interval}</span>
                 </div>
+                {couponPreview && couponPreview.discount_percent && plan.id !== 'free' && (
+                  <div className="mt-2 text-sm text-green-700">
+                    {couponPreview.discount_percent}% off applied • Approx. price: {
+                      (() => {
+                        try {
+                          const digits = plan.priceInr.replace(/[^0-9.]/g, '');
+                          const base = parseFloat(digits) || 0;
+                          const discounted = Math.max(1, Math.round(base * (100 - couponPreview.discount_percent) / 100));
+                          return `₹${discounted}`;
+                        } catch (e) {
+                          return '';
+                        }
+                      })()
+                    }
+                  </div>
+                )}
                 <p className="mt-2 text-sm text-gray-600">
                   {plan.interviews === 'Unlimited' 
                     ? 'Unlimited interviews' 

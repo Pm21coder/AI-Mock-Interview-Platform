@@ -156,7 +156,8 @@ class SubscriptionService:
             return self._free_tier_subscription()
 
         plan_info = self.config_tiers.get(tier, self.config_tiers['free'])
-        monthly_limit = plan_info['monthly_interviews']
+        # Allow user-level override for monthly limit (used for master/unlimited coupons)
+        monthly_limit = user.get('subscription_monthly_limit', plan_info.get('monthly_interviews'))
 
         interviews_remaining = (
             max(0, monthly_limit - interviews_used)
@@ -186,7 +187,7 @@ class SubscriptionService:
         return result
 
     def create_subscription(self, user_id, tier, razorpay_order_id=None,
-                          razorpay_payment_id=None, is_trial=False):
+                          razorpay_payment_id=None, is_trial=False, coupon_code=None):
         """
         Create or activate a subscription for a user.
 
@@ -230,10 +231,18 @@ class SubscriptionService:
             if result.matched_count == 0:
                 logger.warning(f'User {user_id} not found for subscription creation')
 
-            # Record in billing history
-            self._record_billing_event(
-                user_id, 'subscription_created', tier, start_date, end_date
-            )
+            # Record in billing history. Include coupon if present.
+            billing_amount = None
+            if coupon_code:
+                # Don't attempt to compute exact amount server-side unless order info provided
+                # but record that a coupon was applied for audit.
+                self._record_billing_event(
+                    user_id, 'subscription_created', tier, start_date, end_date, amount=billing_amount, coupon_code=coupon_code
+                )
+            else:
+                self._record_billing_event(
+                    user_id, 'subscription_created', tier, start_date, end_date, amount=billing_amount
+                )
         except Exception as e:
             logger.error(f'Error creating subscription for user {user_id}: {e}')
             raise
@@ -241,7 +250,7 @@ class SubscriptionService:
         return self.get_user_subscription(user_id)
 
     def upgrade_subscription(self, user_id, new_tier, razorpay_order_id=None,
-                            razorpay_payment_id=None):
+                            razorpay_payment_id=None, coupon_code=None):
         """
         Upgrade a user's subscription to a higher tier.
 
@@ -273,7 +282,7 @@ class SubscriptionService:
                 self._record_proration_credit(user_id, current_tier, remaining_days)
 
         return self.create_subscription(
-            user_id, new_tier, razorpay_order_id, razorpay_payment_id
+            user_id, new_tier, razorpay_order_id, razorpay_payment_id, coupon_code=coupon_code
         )
 
     def downgrade_to_free(self, user_id):
@@ -643,7 +652,7 @@ class SubscriptionService:
             return []
 
     def _record_billing_event(self, user_id, event_type, tier, start_date=None,
-                             end_date=None, amount=None):
+                             end_date=None, amount=None, coupon_code=None):
         """
         Record a billing event in the history.
 
@@ -664,6 +673,7 @@ class SubscriptionService:
                 'start_date': start_date,
                 'end_date': end_date,
                 'amount': amount,
+                'coupon_code': coupon_code,
             })
         except Exception as e:
             logger.error(f'Error recording billing event for user {user_id}: {e}')
@@ -685,6 +695,10 @@ class SubscriptionService:
             })
         except Exception as e:
             logger.error(f'Error recording proration credit for user {user_id}: {e}')
+
+    # ========================
+    # Coupon Management
+    # ========================
 
     # ========================
     # Trial Period
@@ -733,6 +747,124 @@ class SubscriptionService:
         return self.get_user_subscription(user_id)
 
     def _get_trial_days_remaining(self, user):
+        """Get the number of trial days remaining."""
+        if not user.get('is_trial'):
+            return 0
+
+        end_date = user.get('subscription_end_date')
+        if not end_date:
+            return 0
+
+        remaining = (end_date - utc_now()).days
+        return max(0, remaining)
+
+    # ========================
+    # Coupon Management
+    # ========================
+
+    def create_coupon(self, code, discount_percent, expires_at=None, max_uses=None, **extra_fields):
+        """Create a coupon document.
+
+        Args:
+            code: Coupon code string (case-insensitive)
+            discount_percent: integer 1-100
+            expires_at: optional datetime
+            max_uses: optional integer
+            extra_fields: dict of additional fields to store on coupon (optional)
+        Returns: coupon dict
+        """
+        if not code or not isinstance(discount_percent, (int, float)):
+            raise ValueError('Invalid coupon parameters')
+        coupon = {
+            'code': str(code).strip().upper(),
+            'discount_percent': int(discount_percent),
+            'created_at': utc_now(),
+            'expires_at': expires_at,
+            'max_uses': int(max_uses) if max_uses is not None else None,
+            'uses': 0,
+        }
+        # Merge any additional optional fields (e.g., grant_unlimited, grant_tier)
+        if extra_fields:
+            for k, v in extra_fields.items():
+                coupon[k] = v
+        try:
+            mongo.db.coupons.insert_one(coupon)
+        except Exception as e:
+            logger.error(f'Failed to create coupon {code}: {e}')
+            raise
+        return coupon
+
+    def validate_and_redeem_coupon(self, code):
+        """Atomically validate and reserve (redeem) a coupon.
+
+        Returns discount_percent if successful, otherwise None.
+        """
+        if not code:
+            return None
+        code_norm = str(code).strip().upper()
+        try:
+            # Find coupon and check expiry & uses
+            coupon = mongo.db.coupons.find_one({'code': code_norm})
+            if not coupon:
+                return None
+            if coupon.get('expires_at'):
+                try:
+                    if utc_now() > coupon['expires_at']:
+                        return None
+                except Exception:
+                    pass
+            max_uses = coupon.get('max_uses')
+            uses = coupon.get('uses', 0)
+            if max_uses is not None and uses >= max_uses:
+                return None
+
+            # Atomically increment uses if max_uses not exceeded
+            filter_q = {'code': code_norm}
+            if max_uses is not None:
+                filter_q['uses'] = {'$lt': max_uses}
+            res = mongo.db.coupons.update_one(filter_q, {'$inc': {'uses': 1}})
+            if not res or getattr(res, 'matched_count', 0) == 0:
+                return None
+            return coupon.get('discount_percent')
+        except Exception as e:
+            logger.error(f'Coupon validation failed for {code}: {e}')
+            return None
+
+    def get_coupon_info(self, code):
+        """Check coupon validity without redeeming it. Returns a dict with
+        discount_percent, expires_at, max_uses, uses if coupon exists and is
+        currently valid; otherwise returns None.
+        """
+        if not code:
+            return None
+        code_norm = str(code).strip().upper()
+        try:
+            coupon = mongo.db.coupons.find_one({'code': code_norm})
+            if not coupon:
+                return None
+            # Check expiry
+            if coupon.get('expires_at'):
+                try:
+                    if utc_now() > coupon['expires_at']:
+                        return None
+                except Exception:
+                    pass
+            # Check usage cap
+            max_uses = coupon.get('max_uses')
+            uses = coupon.get('uses', 0)
+            if max_uses is not None and uses >= max_uses:
+                return None
+            return {
+                'code': coupon.get('code'),
+                'discount_percent': coupon.get('discount_percent'),
+                'expires_at': coupon.get('expires_at'),
+                'max_uses': coupon.get('max_uses'),
+                'uses': coupon.get('uses', 0),
+            }
+        except Exception as e:
+            logger.error(f'Failed to read coupon info for {code}: {e}')
+            return None
+
         """Get the number of trial days remaining."""
         if not user.get('is_trial'):
             return 0

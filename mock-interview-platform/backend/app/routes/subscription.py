@@ -148,6 +148,40 @@ def create_razorpay_order():
     if not amount or amount < 100:
         return jsonify({'error': 'Order amount must be at least 100 paise'}), 400
 
+    # Optional coupon application
+    coupon_code = (data.get('coupon_code') or '').strip() or None
+    discount_percent = None
+    if coupon_code:
+        # Validate and reserve (redeem) the coupon so it cannot be double-used
+        discount_percent = subscription_service.validate_and_redeem_coupon(coupon_code)
+        if discount_percent is None:
+            return jsonify({'error': 'Invalid or expired coupon code'}), 400
+        # Compute discounted amount (paise)
+        try:
+            discounted_amount = int(round(amount * (100 - discount_percent) / 100.0))
+            # Razorpay requires at least 100 paise
+            if discounted_amount < 100:
+                discounted_amount = 100
+            amount = discounted_amount
+        except Exception:
+            return jsonify({'error': 'Failed to apply coupon'}), 500
+
+@subscription_bp.route('/validate-coupon', methods=['POST'])
+@token_required
+def validate_coupon():
+    """Validate a coupon code without redeeming it. Returns discount info
+    and metadata so the frontend can preview discounted prices."""
+    data = request.get_json(silent=True) or {}
+    coupon_code = (data.get('coupon_code') or '').strip() or None
+    if not coupon_code:
+        return jsonify({'error': 'Missing coupon_code'}), 400
+
+    info = subscription_service.get_coupon_info(coupon_code)
+    if not info:
+        return jsonify({'error': 'Invalid or expired coupon code'}), 400
+
+    return jsonify({'coupon': info}), 200
+
     # Demo/test-mode has been removed. Require real Razorpay credentials
     # to create an order. If Razorpay is not configured, return an explicit
     # error so administrators can correct the deployment configuration.
@@ -163,16 +197,21 @@ def create_razorpay_order():
     )
 
     try:
+        notes = {
+            'subscription_tier': tier,
+            'user_id': str(current_user['_id']),
+            'email': current_user.get('email', ''),
+        }
+        if coupon_code:
+            notes['coupon_code'] = coupon_code
+            notes['discount_percent'] = discount_percent
+
         order = razorpay_client.order.create(data={
             'amount': amount,
             'currency': Config.RAZORPAY_CURRENCY,
             'receipt': receipt,
             'payment_capture': 1,
-            'notes': {
-                'subscription_tier': tier,
-                'user_id': str(current_user['_id']),
-                'email': current_user.get('email', ''),
-            },
+            'notes': notes,
         }, timeout=Config.RAZORPAY_TIMEOUT_SECONDS)
     except (BadRequestError, GatewayError, ServerError) as exc:
         return _razorpay_order_error_response(exc)
@@ -194,6 +233,8 @@ def create_razorpay_order():
         'status': 'created',
         'is_demo': False,
         'created_at': utc_now(),
+        'coupon_code': coupon_code,
+        'discount_percent': discount_percent,
     }
     # Keep an in-memory map for short-lived verification flows when MongoDB is
     # temporarily unavailable. This is not a test/demo fallback for production.
@@ -278,22 +319,40 @@ def verify_razorpay_payment():
 
     # --- Activate subscription ---
     if tier in ['basic', 'pro']:
+        # Optionally fetch coupon metadata so special coupon behaviors (e.g., master unlimited) can be honored
+        coupon_doc = None
+        coupon_code = order_record.get('coupon_code')
+        if coupon_code and is_mongo_available():
+            try:
+                coupon_doc = mongo.db.coupons.find_one({'code': coupon_code})
+            except Exception:
+                coupon_doc = None
+
         activated_in_mongo = False
         if is_mongo_available():
             try:
+                # Build update document and honor grant_unlimited coupons
+                set_fields = {
+                    'subscription_tier': tier,
+                    'subscription_status': 'active',
+                    'subscription_start_date': utc_now(),
+                    'subscription_end_date': utc_now() + timedelta(days=30),
+                    'razorpay_order_id': razorpay_order_id,
+                    'razorpay_payment_id': razorpay_payment_id,
+                    'interviews_used_this_month': 0,
+                }
+
+                if coupon_doc and coupon_doc.get('grant_unlimited'):
+                    # Ensure the coupon is intended for this tier (or for all tiers when grant_tier is not set)
+                    grant_tier = coupon_doc.get('grant_tier')
+                    if not grant_tier or grant_tier == tier:
+                        set_fields['subscription_end_date'] = None
+                        # Use None to indicate unlimited monthly limit in user document
+                        set_fields['subscription_monthly_limit'] = None
+
                 result = mongo.db.users.update_one(
                     {'_id': current_user['_id']},
-                    {
-                        '$set': {
-                            'subscription_tier': tier,
-                            'subscription_status': 'active',
-                            'subscription_start_date': utc_now(),
-                            'subscription_end_date': utc_now() + timedelta(days=30),
-                            'razorpay_order_id': razorpay_order_id,
-                            'razorpay_payment_id': razorpay_payment_id,
-                            'interviews_used_this_month': 0,
-                        }
-                    }
+                    {'$set': set_fields}
                 )
                 activated_in_mongo = result.matched_count > 0
             except Exception as exc:
@@ -315,10 +374,20 @@ def verify_razorpay_payment():
                 razorpay_payment_id, 'success'
             )
         else:
+            # Fallback subscription when MongoDB is unavailable
             _store_fallback_subscription(
                 current_user['_id'], tier, razorpay_order_id, razorpay_payment_id
             )
-            
+
+            # If coupon grants unlimited, apply to fallback in-memory subscription as well
+            if coupon_doc and coupon_doc.get('grant_unlimited'):
+                fb = fallback_razorpay_orders.get(razorpay_order_id) or {}
+                # fallback_subscriptions stores per-user fallback; set there if present
+                user_key = str(current_user['_id'])
+                if user_key in fallback_subscriptions:
+                    fallback_subscriptions[user_key]['subscription_end_date'] = None
+                    fallback_subscriptions[user_key]['subscription_monthly_limit'] = None
+
             # Log successful payment in fallback mode
             amount = order_record.get('amount', 0)
             audit_logger.log_payment_completed(
@@ -413,7 +482,8 @@ def upgrade_subscription():
             user_id,
             new_tier,
             razorpay_order_id=data.get('razorpay_order_id'),
-            razorpay_payment_id=data.get('razorpay_payment_id')
+            razorpay_payment_id=data.get('razorpay_payment_id'),
+            coupon_code=(data.get('coupon_code') or '').strip() or None,
         )
         return jsonify({
             'message': f'Successfully upgraded to {new_tier} plan',
@@ -731,3 +801,29 @@ def _get_detailed_breakdown(interviews):
         del breakdown[category]['scores']  # Remove raw scores from response
     
     return breakdown
+
+
+@subscription_bp.route('/create-coupon', methods=['POST'])
+@token_required
+def create_coupon():
+    """Create a coupon for testing/admin use. In production restrict this to admins only."""
+    data = request.get_json(silent=True) or {}
+    code = (data.get('code') or '').strip()
+    try:
+        discount = int(data.get('discount_percent', 0))
+    except Exception:
+        return jsonify({'error': 'Invalid discount_percent'}), 400
+    if not code or discount <= 0 or discount > 100:
+        return jsonify({'error': 'Invalid coupon parameters'}), 400
+    expires_in_days = data.get('expires_in_days')
+    max_uses = data.get('max_uses')
+    from datetime import timedelta
+    expires_at = None
+    if isinstance(expires_in_days, (int, float)) and expires_in_days > 0:
+        expires_at = utc_now() + timedelta(days=int(expires_in_days))
+    try:
+        coupon = subscription_service.create_coupon(code, discount, expires_at=expires_at, max_uses=max_uses)
+        return jsonify({'coupon': coupon}), 201
+    except Exception as e:
+        current_app.logger.exception('Failed to create coupon')
+        return jsonify({'error': str(e)}), 500

@@ -97,5 +97,71 @@
     "subscription_end_date": "2026-09-19 07:15:06.979452",
     "interviews_used_this_month": 1,
     "_id": "demo_4eef733d-46d9-442d-b4c4-4caee5086717"
+  },
+  "coupon.creator+1787211607@example.com": {
+    "email": "coupon.creator+1787211607@example.com",
+    "password_hash": "$2b$12$OrQAR192u6lH8g./vPXlHOrWjk7Az87XsyssUKZxOajKpCDeQkhHC",
+    "created_at": "2026-08-20 07:40:06.734700",
+    "subscription_tier": "free",
+    "subscription_status": "active",
+    "subscription_start_date": "2026-08-20 07:40:06.734700",
+    "subscription_end_date": "2026-09-19 07:40:06.734700",
+    "interviews_used_this_month": 0,
+    "_id": "demo_074353d7-1ead-43b1-81a7-dd03fa5a8ecf"
+  },
+  "coupon.creator+1787211639@example.com": {
+    "email": "coupon.creator+1787211639@example.com",
+    "password_hash": "$2b$12$Xp9YoG6LjAtvkQXGArPp..FUZUbnPqXE7WcIYqn8l.tA/dQCuoV6i",
+    "created_at": "2026-08-20 07:40:38.658622",
+    "subscription_tier": "free",
+    "subscription_status": "active",
+    "subscription_start_date": "2026-08-20 07:40:38.658622",
+    "subscription_end_date": "2026-09-19 07:40:38.658622",
+    "interviews_used_this_month": 0,
+    "_id": "demo_6958d6d4-db49-406f-a659-6151757a08fd"
+  },
+  "coupon.creator+1787211686@example.com": {
+    "email": "coupon.creator+1787211686@example.com",
+    "password_hash": "$2b$12$98kqzHUQwPaIZW.l6DzebuXnO5qYRA2XG6tkc.Pb9Q4ixN1IyYzZq",
+    "created_at": "2026-08-20 07:41:26.255313",
+    "subscription_tier": "free",
+    "subscription_status": "active",
+    "subscription_start_date": "2026-08-20 07:41:26.255313",
+    "subscription_end_date": "2026-09-19 07:41:26.255313",
+    "interviews_used_this_month": 0,
+    "_id": "demo_bf35f73e-d6aa-455c-aea9-fd9b8f43dd22"
+  },
+  "coupon.creator+1787211761@example.com": {
+    "email": "coupon.creator+1787211761@example.com",
+    "password_hash": "$2b$12$GLbavnOM4Z2RX/zR8jxyje9lv7omg5lv9NPtxp/itl3tM0BbLp8TO",
+    "created_at": "2026-08-20 07:42:41.099095",
+    "subscription_tier": "free",
+    "subscription_status": "active",
+    "subscription_start_date": "2026-08-20 07:42:41.099095",
+    "subscription_end_date": "2026-09-19 07:42:41.099095",
+    "interviews_used_this_month": 0,
+    "_id": "demo_8bed245a-5a8a-4401-949d-20ffaf383446"
+  },
+  "coupon.creator+1787192616@example.com": {
+    "email": "coupon.creator+1787192616@example.com",
+    "password_hash": "$2b$12$pMTQeU/86KZexO9j3f.5g.N2YT7pJHR9I/KSV3ttmxTIUNqzWfKSC",
+    "created_at": "2026-08-20 07:53:36.212228",
+    "subscription_tier": "free",
+    "subscription_status": "active",
+    "subscription_start_date": "2026-08-20 07:53:36.212228",
+    "subscription_end_date": "2026-09-19 07:53:36.212228",
+    "interviews_used_this_month": 0,
+    "_id": "demo_338f8fe9-1e2d-4f3b-84cc-26d1c18e3683"
+  },
+  "coupon.checker+1787193105@example.com": {
+    "email": "coupon.checker+1787193105@example.com",
+    "password_hash": "$2b$12$viFm.BeiJL199gBFp9XDzeisMCyLQLGnvbnGyOprmv07RMkyh2r4.",
+    "created_at": "2026-08-20 08:01:45.933760",
+    "subscription_tier": "free",
+    "subscription_status": "active",
+    "subscription_start_date": "2026-08-20 08:01:45.933760",
+    "subscription_end_date": "2026-09-19 08:01:45.933760",
+    "interviews_used_this_month": 0,
+    "_id": "demo_858021ad-5bb5-4f28-99e0-dfaa55c190b5"
   }
 }

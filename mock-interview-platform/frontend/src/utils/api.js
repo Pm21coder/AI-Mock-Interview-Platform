@@ -790,6 +790,21 @@ export const getAvailableFeatures = async () => {
   return response.data;
 };
 
+export const validateCoupon = async (coupon_code) => {
+  try {
+    const response = await api.post('/api/subscription/validate-coupon', { coupon_code });
+    return response.data;
+  } catch (error) {
+    const status = error?.response?.status;
+    const respData = error?.response?.data;
+    const serverMsg = respData?.error || error?.message || 'Failed to validate coupon';
+    const out = new Error(serverMsg);
+    out.status = status;
+    out.response = error?.response;
+    throw out;
+  }
+};
+
 export const hasFeatureAccess = async (featureName) => {
   const response = await api.get(`/api/subscription/has-feature/${featureName}`);
   return response.data.has_access;
