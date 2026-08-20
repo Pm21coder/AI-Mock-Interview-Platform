@@ -456,12 +456,77 @@ def validate_coupon():
         info = subscription_service.get_coupon_info(coupon_code)
         if not info:
             current_app.logger.info('validate-coupon: code not found or expired: %s', coupon_code)
+            # Detailed debug record for missing coupon
+            try:
+                import json as _json
+                debug = {
+                    'ts': utc_now().isoformat(),
+                    'remote_addr': request.remote_addr,
+                    'method': request.method,
+                    'path': request.path,
+                    'headers': {k: ('[REDACTED]' if k.lower() == 'authorization' else v) for k, v in request.headers.items()},
+                    'body': data,
+                    'coupon_code': coupon_code,
+                    'result': 'not_found'
+                }
+                log_path = _json.dumps(debug) + "\n"
+                # Append to debug log in repository's temp folder
+                try:
+                    log_file = os.path.join(os.path.dirname(__file__), '..', '..', 'debug_coupon_validation.log')
+                    with open(log_file, 'a', encoding='utf-8') as lf:
+                        lf.write(log_path)
+                except Exception:
+                    # If writing file fails, still proceed — the main logger captured an event
+                    pass
+            except Exception:
+                pass
             return jsonify({'error': 'Invalid or expired coupon code'}), 400
 
         current_app.logger.info('validate-coupon: found coupon %s (grant_unlimited=%s, grant_tier=%s)', info.get('code'), info.get('grant_unlimited'), info.get('grant_tier'))
+        # Also append a success debug record to the debug log
+        try:
+            import json as _json
+            debug = {
+                'ts': utc_now().isoformat(),
+                'remote_addr': request.remote_addr,
+                'method': request.method,
+                'path': request.path,
+                'headers': {k: ('[REDACTED]' if k.lower() == 'authorization' else v) for k, v in request.headers.items()},
+                'body': data,
+                'coupon_code': coupon_code,
+                'result': 'found',
+                'coupon_meta': {
+                    'grant_unlimited': info.get('grant_unlimited'),
+                    'grant_tier': info.get('grant_tier'),
+                    'code': info.get('code')
+                }
+            }
+            log_file = os.path.join(os.path.dirname(__file__), '..', '..', 'debug_coupon_validation.log')
+            with open(log_file, 'a', encoding='utf-8') as lf:
+                lf.write(_json.dumps(debug) + "\n")
+        except Exception:
+            pass
         return jsonify({'coupon': info}), 200
     except Exception as e:
         current_app.logger.exception('Error validating coupon %s: %s', coupon_code, e)
+        try:
+            import json as _json
+            debug = {
+                'ts': utc_now().isoformat(),
+                'remote_addr': request.remote_addr,
+                'method': request.method,
+                'path': request.path,
+                'headers': {k: ('[REDACTED]' if k.lower() == 'authorization' else v) for k, v in request.headers.items()},
+                'body': data,
+                'coupon_code': coupon_code,
+                'result': 'exception',
+                'error': str(e)
+            }
+            log_file = os.path.join(os.path.dirname(__file__), '..', '..', 'debug_coupon_validation.log')
+            with open(log_file, 'a', encoding='utf-8') as lf:
+                lf.write(_json.dumps(debug) + "\n")
+        except Exception:
+            pass
         return jsonify({'error': 'Internal server error during coupon validation'}), 500
 
 @subscription_bp.route('/cancel', methods=['POST'])
