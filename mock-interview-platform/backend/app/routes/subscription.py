@@ -166,22 +166,6 @@ def create_razorpay_order():
         except Exception:
             return jsonify({'error': 'Failed to apply coupon'}), 500
 
-@subscription_bp.route('/validate-coupon', methods=['POST'])
-@token_required
-def validate_coupon():
-    """Validate a coupon code without redeeming it. Returns discount info
-    and metadata so the frontend can preview discounted prices."""
-    data = request.get_json(silent=True) or {}
-    coupon_code = (data.get('coupon_code') or '').strip() or None
-    if not coupon_code:
-        return jsonify({'error': 'Missing coupon_code'}), 400
-
-    info = subscription_service.get_coupon_info(coupon_code)
-    if not info:
-        return jsonify({'error': 'Invalid or expired coupon code'}), 400
-
-    return jsonify({'coupon': info}), 200
-
     # Demo/test-mode has been removed. Require real Razorpay credentials
     # to create an order. If Razorpay is not configured, return an explicit
     # error so administrators can correct the deployment configuration.
@@ -405,6 +389,22 @@ def verify_razorpay_payment():
         'tier': tier,
     }), 200
 
+
+@subscription_bp.route('/validate-coupon', methods=['POST'])
+@token_required
+def validate_coupon():
+    """Validate a coupon code without redeeming it. Returns discount info
+    and metadata so the frontend can preview discounted prices."""
+    data = request.get_json(silent=True) or {}
+    coupon_code = (data.get('coupon_code') or '').strip() or None
+    if not coupon_code:
+        return jsonify({'error': 'Missing coupon_code'}), 400
+
+    info = subscription_service.get_coupon_info(coupon_code)
+    if not info:
+        return jsonify({'error': 'Invalid or expired coupon code'}), 400
+
+    return jsonify({'coupon': info}), 200
 
 @subscription_bp.route('/cancel', methods=['POST'])
 @token_required

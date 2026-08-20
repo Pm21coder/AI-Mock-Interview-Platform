@@ -35,6 +35,8 @@ mongo = _MongoProxy()
 from app.config import Config
 from app.utils.mongo_state import is_mongo_available, mark_mongo_unavailable
 from app.utils.time import utc_now
+import json
+import os
 
 logger = logging.getLogger(__name__)
 
@@ -803,28 +805,59 @@ class SubscriptionService:
             return None
         code_norm = str(code).strip().upper()
         try:
-            # Find coupon and check expiry & uses
-            coupon = mongo.db.coupons.find_one({'code': code_norm})
+            coupon = None
+            # Try MongoDB first if available
+            if is_mongo_available():
+                try:
+                    coupon = mongo.db.coupons.find_one({'code': code_norm})
+                except Exception:
+                    coupon = None
+
+            # If coupon not found in Mongo, try fallback file for master coupons
+            if not coupon:
+                try:
+                    data_path = os.path.join(os.path.dirname(__file__), '..', '..', 'data', 'master_coupons.json')
+                    if os.path.exists(data_path):
+                        with open(data_path, 'r', encoding='utf-8') as f:
+                            arr = json.load(f)
+                        for c in arr:
+                            if str(c.get('code', '')).strip().upper() == code_norm:
+                                coupon = c
+                                break
+                except Exception:
+                    coupon = None
+
             if not coupon:
                 return None
+
+            # Check expiry if available (Mongo datetime) or assume valid for string
             if coupon.get('expires_at'):
                 try:
-                    if utc_now() > coupon['expires_at']:
+                    expires = coupon['expires_at']
+                    if not isinstance(expires, str) and utc_now() > expires:
                         return None
                 except Exception:
                     pass
+
             max_uses = coupon.get('max_uses')
             uses = coupon.get('uses', 0)
             if max_uses is not None and uses >= max_uses:
                 return None
 
-            # Atomically increment uses if max_uses not exceeded
-            filter_q = {'code': code_norm}
-            if max_uses is not None:
-                filter_q['uses'] = {'$lt': max_uses}
-            res = mongo.db.coupons.update_one(filter_q, {'$inc': {'uses': 1}})
-            if not res or getattr(res, 'matched_count', 0) == 0:
-                return None
+            # If coupon comes from Mongo, try to increment uses atomically
+            if is_mongo_available() and coupon and coupon.get('_id'):
+                try:
+                    filter_q = {'code': code_norm}
+                    if max_uses is not None:
+                        filter_q['uses'] = {'$lt': max_uses}
+                    res = mongo.db.coupons.update_one(filter_q, {'$inc': {'uses': 1}})
+                    if not res or getattr(res, 'matched_count', 0) == 0:
+                        return None
+                except Exception:
+                    # If updating failed, fall through and accept for now
+                    pass
+
+            # For fallback-file coupons (master coupons) we do not track uses
             return coupon.get('discount_percent')
         except Exception as e:
             logger.error(f'Coupon validation failed for {code}: {e}')
@@ -839,21 +872,50 @@ class SubscriptionService:
             return None
         code_norm = str(code).strip().upper()
         try:
-            coupon = mongo.db.coupons.find_one({'code': code_norm})
+            coupon = None
+            # Try MongoDB first if available
+            if is_mongo_available():
+                try:
+                    coupon = mongo.db.coupons.find_one({'code': code_norm})
+                except Exception:
+                    coupon = None
+            # If no coupon in Mongo, try fallback master coupon file
+            if not coupon:
+                try:
+                    data_path = os.path.join(os.path.dirname(__file__), '..', '..', 'data', 'master_coupons.json')
+                    if os.path.exists(data_path):
+                        with open(data_path, 'r', encoding='utf-8') as f:
+                            arr = json.load(f)
+                        for c in arr:
+                            if str(c.get('code', '')).strip().upper() == code_norm:
+                                coupon = c
+                                break
+                except Exception:
+                    coupon = None
+
             if not coupon:
                 return None
-            # Check expiry
+
+            # Normalize expiry check (works for both datetime from Mongo or string in file)
             if coupon.get('expires_at'):
                 try:
-                    if utc_now() > coupon['expires_at']:
-                        return None
+                    expires = coupon['expires_at']
+                    # If string, we won't parse strictly; assume valid for master coupons
+                    if isinstance(expires, str):
+                        # No check for string expiry; assume master coupons in file are valid
+                        pass
+                    else:
+                        if utc_now() > expires:
+                            return None
                 except Exception:
                     pass
+
             # Check usage cap
             max_uses = coupon.get('max_uses')
             uses = coupon.get('uses', 0)
             if max_uses is not None and uses >= max_uses:
                 return None
+
             return {
                 'code': coupon.get('code'),
                 'discount_percent': coupon.get('discount_percent'),
