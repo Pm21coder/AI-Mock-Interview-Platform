@@ -134,6 +134,28 @@ function logApiError(endpoint, error) {
     const out = { endpoint, ...serialized };
     const isDev = typeof process !== 'undefined' && process.env && process.env.NODE_ENV !== 'production';
 
+    // If this is a network error (no response), asynchronously probe the health endpoint
+    // to help determine whether the backend is reachable from the browser.
+    if (!serialized.status && typeof window !== 'undefined') {
+      (async () => {
+        try {
+          const base = api?.defaults?.baseURL || '';
+          const healthPath = base.endsWith('/') ? `${base}api/health` : `${base}/api/health`;
+          const controller = new AbortController();
+          const id = setTimeout(() => controller.abort(), 3000);
+          const res = await fetch(healthPath, { method: 'GET', cache: 'no-store', signal: controller.signal });
+          clearTimeout(id);
+          if (res.ok) {
+            console.debug(`Backend health check OK at ${healthPath}`);
+          } else {
+            console.warn(`Backend health check returned ${res.status} at ${healthPath}`);
+          }
+        } catch (probeErr) {
+          console.warn('Backend health check failed to reach server:', probeErr?.message || probeErr);
+        }
+      })();
+    }
+
     if (isDev) {
       // Development: show the full serialized payload for easier debugging
       console.error(`API error at ${endpoint}: ${JSON.stringify(out, null, 2)}`);
@@ -214,7 +236,7 @@ const api = axios.create({
   // same-origin '' for local development where rewrites are convenient.
   baseURL: (typeof process !== 'undefined' && process.env && process.env.NEXT_PUBLIC_API_URL)
     ? process.env.NEXT_PUBLIC_API_URL
-    : '',
+    : (typeof window !== 'undefined' ? window.location.origin : ''),
   // Increase default axios timeout to accommodate long-running AI requests
   timeout: 120_000,
   headers: {
