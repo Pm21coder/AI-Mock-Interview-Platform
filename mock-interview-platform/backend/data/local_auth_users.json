@@ -84,7 +84,7 @@
     "subscription_status": "active",
     "subscription_start_date": "2026-08-20 06:58:10.084717",
     "subscription_end_date": "2026-09-19 06:58:10.084717",
-    "interviews_used_this_month": 2,
+    "interviews_used_this_month": 3,
     "_id": "demo_3439b588-3f34-4b07-ae37-f4eab0a5ef85"
   },
   "smoketest+user@example.com": {
@@ -372,5 +372,38 @@
     "subscription_end_date": "2026-09-19 11:34:27.121466",
     "interviews_used_this_month": 0,
     "_id": "demo_d897f7f6-2207-429a-8e92-34c73a168f79"
+  },
+  "integration.master+1787229856@example.com": {
+    "email": "integration.master+1787229856@example.com",
+    "password_hash": "$2b$12$S4gu96DQr6qBmCwssMlTCO0W4ZWvmHFuV7eDgjpk8KLbPKwoNWW6q",
+    "created_at": "2026-08-20 12:44:15.614655",
+    "subscription_tier": "free",
+    "subscription_status": "active",
+    "subscription_start_date": "2026-08-20 12:44:15.614655",
+    "subscription_end_date": "2026-09-19 12:44:15.614655",
+    "interviews_used_this_month": 0,
+    "_id": "demo_ed245bbf-e065-4182-b29b-23c7442b30d3"
+  },
+  "test_razorpay_1787235039@example.com": {
+    "email": "test_razorpay_1787235039@example.com",
+    "password_hash": "$2b$12$lTRalcudBSXhqPGhX.e0yuEmDVWohR8sCfUYdUEQA5jmMncgnDSKy",
+    "created_at": "2026-08-20 14:10:39.115706",
+    "subscription_tier": "free",
+    "subscription_status": "active",
+    "subscription_start_date": "2026-08-20 14:10:39.115706",
+    "subscription_end_date": "2026-09-19 14:10:39.115706",
+    "interviews_used_this_month": 0,
+    "_id": "demo_ec90dd30-8a1e-4473-addb-16dc2e645066"
+  },
+  "test_razorpay_1787235348@example.com": {
+    "email": "test_razorpay_1787235348@example.com",
+    "password_hash": "$2b$12$Cw4G3BbGSP3pnRGpyT8RLO8ZF3lcHmmMUgmkV7S/nC2gESNh.hrr2",
+    "created_at": "2026-08-20 14:15:48.989524",
+    "subscription_tier": "free",
+    "subscription_status": "active",
+    "subscription_start_date": "2026-08-20 14:15:48.989524",
+    "subscription_end_date": "2026-09-19 14:15:48.989524",
+    "interviews_used_this_month": 0,
+    "_id": "demo_d0548872-084c-4a9b-8e00-9b697b1782a3"
   }
 }

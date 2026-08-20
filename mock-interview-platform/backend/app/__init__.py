@@ -100,7 +100,32 @@ def create_app(config_class=Config):
 
     # Configure CORS with restricted origins for security
     cors_origins = app.config.get('CORS_ORIGINS', ['http://localhost:3000'])
-    CORS(app, origins=cors_origins, supports_credentials=True)
+    # In development prefer a permissive CORS policy to avoid dev-origin mismatches
+    # (we do not enable credentials with wildcard origins for safety).
+    if app.config.get('FLASK_DEBUG', False):
+        CORS(app, origins='*', supports_credentials=False)
+    else:
+        CORS(app, origins=cors_origins, supports_credentials=True)
+
+    # In development, ensure the response echoes the request Origin when it is
+    # one of the allowed origins. This is a fallback that attempts to make the
+    # dev experience robust in environments where extension ordering varies.
+    if app.config.get('FLASK_DEBUG', False):
+        from flask import request as _request
+        @app.after_request
+        def _ensure_cors_header(response):
+            try:
+                origin = _request.headers.get('Origin')
+                if origin:
+                    # For dev we allow any Origin and echo it for simple requests
+                    response.headers['Access-Control-Allow-Origin'] = origin
+                    # We intentionally do not set Access-Control-Allow-Credentials here
+                    # when using wildcard-style dev CORS to avoid browser rejections.
+                    response.headers.setdefault('Access-Control-Allow-Methods', 'GET,POST,OPTIONS')
+                    response.headers.setdefault('Access-Control-Allow-Headers', 'Content-Type,Authorization')
+            except Exception:
+                pass
+            return response
     
     # Initialize rate limiter
     limiter.init_app(app)

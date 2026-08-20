@@ -203,11 +203,33 @@ function logApiError(endpoint, error) {
 function invalidResumeIdError(resumeId) {
   const error = new Error('A valid resume ID is required to load an analysis.');
   error.code = 'INVALID_RESUME_ID';
-  console.error('Resume analysis request skipped:', {
+  console.warn('Resume analysis request skipped:', {
     reason: error.message,
     resumeIdPresent: Boolean(resumeId),
   });
   return error;
+}
+
+function toSafeErrorDetails(error) {
+  const serialized = typeof error?.toJSON === 'function' ? error.toJSON() : null;
+  const response = error?.response || serialized?.response || null;
+  const config = error?.config || serialized?.config || {};
+
+  const details = {
+    message: error?.message || serialized?.message || 'Request failed',
+    code: error?.code || serialized?.code || null,
+    status: response?.status ?? serialized?.status ?? null,
+    statusText: response?.statusText ?? serialized?.statusText ?? null,
+    method: config?.method ?? null,
+    url: config?.url ?? null,
+    data: response?.data ?? serialized?.data ?? null,
+  };
+
+  if (error?.cause && !details.message) {
+    details.message = String(error.cause);
+  }
+
+  return details;
 }
 
 // Notify the application about a transient network issue so UI components
@@ -234,6 +256,17 @@ function notifyNetworkIssue(details) {
     }
   } catch (e) {
     // non-fatal
+  }
+}
+
+function clearNetworkIssue() {
+  try {
+    if (typeof window === 'undefined') return;
+    window.localStorage.removeItem('last_network_issue');
+    window.localStorage.removeItem('network_issue_dismissed_at');
+    window.dispatchEvent(new CustomEvent('app:network-issue', { detail: null }));
+  } catch (e) {
+    // ignore storage failures
   }
 }
 
@@ -340,7 +373,10 @@ api.interceptors.request.use((config) => {
 // the request once without it instead of blocking the interview or resume
 // workflow with a 401 response.
 api.interceptors.response.use(
-  (response) => response,
+  (response) => {
+    clearNetworkIssue();
+    return response;
+  },
   async (error) => {
     const originalRequest = error.config;
     const isPracticeRequest =
@@ -665,14 +701,22 @@ export const getDashboardStats = async (options = { forceRefresh: false }) => {
       url: error?.config?.url ?? null,
     };
 
+    const safeErrorDetails = toSafeErrorDetails(error || serializedError || null);
+    const isResourceNotFound = (safeErrorDetails.status === 404) || (safeErrorDetails.message || '').toLowerCase().includes('resource not found');
+
     // Ensure we log a stable, inspectable representation — some consoles
     // display empty objects if all properties are undefined. Stringify to be
     // explicit and also provide the original Axios error when available.
-    try {
-      console.error('getDashboardStats error:', JSON.parse(JSON.stringify(errorDetails)));
-    } catch (e) {
-      // Fallback if stringify fails for some reason
-      console.error('getDashboardStats error (raw):', error || serializedError || 'Unknown');
+    if (isResourceNotFound) {
+      console.warn('getDashboardStats endpoint unavailable; using fallback stats.', safeErrorDetails);
+    } else {
+      // Stringify to ensure consoles display useful information even when
+      // the error object has only non-enumerable properties (Axios errors).
+      try {
+        console.error('getDashboardStats error:', JSON.stringify(safeErrorDetails) || safeErrorDetails);
+      } catch (e) {
+        console.error('getDashboardStats error (unserializable):', safeErrorDetails);
+      }
     }
 
     if (serializedError) {
@@ -776,6 +820,12 @@ export const getResumeHistory = async () => {
     } catch (e) {
       // ignore
     }
+
+    if (!error?.response) {
+      console.warn('Resume history API unavailable; returning empty result set for offline-safe UI.', error?.message || error);
+      return { resumes: [] };
+    }
+
     throw error;
   }
 };

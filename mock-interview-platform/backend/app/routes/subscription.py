@@ -15,7 +15,6 @@ from app.utils.mongo_state import is_mongo_available, mark_mongo_unavailable
 from app.utils.time import utc_now
 from app.cache_utils import cache_response, optimize_response
 from flask_limiter.util import get_remote_address
-from flask import request
 
 # Use per-user key when available to avoid IP-based 429s for authenticated users
 def _user_or_ip_key():
@@ -283,8 +282,8 @@ def create_razorpay_order():
         }, timeout=Config.RAZORPAY_TIMEOUT_SECONDS)
     except (BadRequestError, GatewayError, ServerError) as exc:
         return _razorpay_order_error_response(exc)
-    except Exception:
-        current_app.logger.exception('Unexpected Razorpay order creation failure')
+    except Exception as exc:
+        current_app.logger.exception('Unexpected Razorpay order creation failure: %s', exc)
         return jsonify({
             'error': 'Unable to contact Razorpay. Please try again in a moment.'
         }), 502

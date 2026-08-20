@@ -27,6 +27,17 @@ export default function NetworkIssueBanner() {
         setIssue(null);
         return;
       }
+
+      const stale = Date.now() - Number(last.ts || 0) > 1000 * 60 * 10;
+      if (stale) {
+        try {
+          window.localStorage.removeItem(STORAGE_KEY);
+        } catch (e) {}
+        setVisible(false);
+        setIssue(null);
+        return;
+      }
+
       try {
         const dismissedAt = Number(window.localStorage.getItem(DISMISS_KEY)) || 0;
         // Auto-hide if user dismissed within last 5 minutes
@@ -40,9 +51,15 @@ export default function NetworkIssueBanner() {
       setVisible(true);
     }
 
-    evaluate();
-
     function onNetworkEvent(e) {
+      if (!e.detail) {
+        try {
+          window.localStorage.removeItem(STORAGE_KEY);
+        } catch (err) {}
+        setVisible(false);
+        setIssue(null);
+        return;
+      }
       try {
         window.localStorage.setItem(STORAGE_KEY, JSON.stringify(e.detail));
       } catch (err) {}
