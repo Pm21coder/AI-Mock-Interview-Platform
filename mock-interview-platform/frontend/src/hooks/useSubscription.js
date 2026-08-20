@@ -9,6 +9,8 @@ import {
 const STORAGE_KEY = 'subscription_data';
 const CACHE_DURATION = 60 * 1000; // Show cached data instantly; revalidate every minute.
 const inFlightRequests = new Map();
+// Simple SWR-style in-memory cache keyed by accountEmail
+const swrCache = new Map(); // key -> { data, timestamp }
 
 function getCachedSubscription(accountEmail) {
   if (typeof window === 'undefined' || !accountEmail) return null;
@@ -43,15 +45,48 @@ function cacheSubscription(data, accountEmail) {
   }
 }
 
+/**
+ * requestSubscription: deduplicate in-flight requests and provide a basic
+ * stale-while-revalidate cache. Returns a promise that resolves to the
+ * subscription data. If cache exists and is fresh it returns cached data
+ * immediately and triggers a background revalidation.
+ */
 function requestSubscription(accountKey) {
-  const pendingRequest = inFlightRequests.get(accountKey);
-  if (pendingRequest) return pendingRequest;
+  // If a cached fresh value exists, return it immediately but trigger
+  // a background revalidation to update the cache.
+  const cached = swrCache.get(accountKey);
+  if (cached && Date.now() - cached.timestamp < CACHE_DURATION) {
+    // Background revalidate (do not await)
+    if (!inFlightRequests.has(accountKey)) {
+      const bg = getSubscriptionStatus()
+        .then((data) => {
+          swrCache.set(accountKey, { data, timestamp: Date.now() });
+          try { cacheSubscription(data, accountKey); } catch (e) {}
+          return data;
+        })
+        .finally(() => inFlightRequests.delete(accountKey));
+      inFlightRequests.set(accountKey, bg);
+    }
+    return Promise.resolve(cached.data);
+  }
 
-  const request = getSubscriptionStatus().finally(() => {
-    inFlightRequests.delete(accountKey);
-  });
-  inFlightRequests.set(accountKey, request);
-  return request;
+  // If a fetch is already in-flight, return that promise
+  const pending = inFlightRequests.get(accountKey);
+  if (pending) return pending;
+
+  // Otherwise, fetch and cache the result
+  const req = getSubscriptionStatus()
+    .then((data) => {
+      swrCache.set(accountKey, { data, timestamp: Date.now() });
+      try { cacheSubscription(data, accountKey); } catch (e) {}
+      return data;
+    })
+    .finally(() => {
+      inFlightRequests.delete(accountKey);
+    });
+
+  inFlightRequests.set(accountKey, req);
+  return req;
 }
 
 /** Clear the current user's subscription and dependent API caches. */
@@ -75,6 +110,7 @@ export function useSubscription() {
   // Backoff handling for rate-limited responses (429)
   const backoffUntilRef = useRef(0); // timestamp (ms) until which polling is suppressed
   const backoffMsRef = useRef(60 * 1000); // initial backoff 1 minute
+  const [isUsingBackoffCache, setIsUsingBackoffCache] = useState(false); // shows UI when cached due to backoff
 
   const applySubscription = useCallback((data) => {
     if (subscriptionTierRef.current && data?.tier && subscriptionTierRef.current !== data.tier) {
@@ -108,6 +144,7 @@ export function useSubscription() {
     if (Date.now() < backoffUntilRef.current) {
       console.warn('[useSubscription] Skipping fetch due to backoff until', new Date(backoffUntilRef.current).toISOString());
       setLoading(false);
+      setIsUsingBackoffCache(true);
       return cached;
     }
 
@@ -120,6 +157,7 @@ export function useSubscription() {
       // On success reset backoff
       backoffMsRef.current = 60 * 1000;
       backoffUntilRef.current = 0;
+      setIsUsingBackoffCache(false);
 
       applySubscription(data);
       setError(null);  // Clear error on success
@@ -133,6 +171,7 @@ export function useSubscription() {
         backoffMsRef.current = next;
         backoffUntilRef.current = Date.now() + next;
         console.warn('[useSubscription] Received 429, backing off for ms=', next);
+        setIsUsingBackoffCache(true);
       }
 
       // Keep the last verified value visible if the user is temporarily offline.
@@ -212,5 +251,6 @@ export function useSubscription() {
     error,
     refetch: fetchSubscription,
     isGuest: !isAuthenticated,
+    isUsingBackoffCache,
   };
 }
