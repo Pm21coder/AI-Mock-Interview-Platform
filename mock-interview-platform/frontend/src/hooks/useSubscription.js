@@ -72,6 +72,9 @@ export function useSubscription() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const subscriptionTierRef = useRef(subscription?.tier || null);
+  // Backoff handling for rate-limited responses (429)
+  const backoffUntilRef = useRef(0); // timestamp (ms) until which polling is suppressed
+  const backoffMsRef = useRef(60 * 1000); // initial backoff 1 minute
 
   const applySubscription = useCallback((data) => {
     if (subscriptionTierRef.current && data?.tier && subscriptionTierRef.current !== data.tier) {
@@ -101,16 +104,37 @@ export function useSubscription() {
     }
     setError(null);
 
+    // If we're currently in a backoff period due to previous 429, avoid hitting the server
+    if (Date.now() < backoffUntilRef.current) {
+      console.warn('[useSubscription] Skipping fetch due to backoff until', new Date(backoffUntilRef.current).toISOString());
+      setLoading(false);
+      return cached;
+    }
+
     try {
       const data = await requestSubscription(email || '__authenticated__');
       if (!data || data.error) {
         throw new Error(data?.error || 'Failed to load subscription');
       }
 
+      // On success reset backoff
+      backoffMsRef.current = 60 * 1000;
+      backoffUntilRef.current = 0;
+
       applySubscription(data);
       setError(null);  // Clear error on success
       return data;
     } catch (err) {
+      // If server responded with 429, apply exponential backoff to avoid spamming the endpoint
+      const status = err?.response?.status || (err?.status || null);
+      if (status === 429) {
+        const prev = backoffMsRef.current || 60 * 1000;
+        const next = Math.min(prev * 2, 60 * 60 * 1000); // cap at 1 hour
+        backoffMsRef.current = next;
+        backoffUntilRef.current = Date.now() + next;
+        console.warn('[useSubscription] Received 429, backing off for ms=', next);
+      }
+
       // Keep the last verified value visible if the user is temporarily offline.
       if (!cached) {
         // Only show error if it's not a network issue or if we have no fallback data
