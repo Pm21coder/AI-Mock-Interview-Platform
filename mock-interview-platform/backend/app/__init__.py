@@ -104,6 +104,15 @@ def create_app(config_class=Config):
     
     # Initialize rate limiter
     limiter.init_app(app)
+
+    # Return JSON for rate-limited responses (avoid HTML pages leaking into the SPA)
+    from flask import jsonify
+    @app.errorhandler(429)
+    def ratelimit_handler(e):
+        return jsonify({
+            'error': 'Too many requests',
+            'message': str(e)
+        }), 429
     
     # Enforce HTTPS in production
     if not app.debug and os.getenv('FLASK_ENV', '').lower() == 'production':
