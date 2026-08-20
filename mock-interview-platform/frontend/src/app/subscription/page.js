@@ -10,6 +10,7 @@ import {
   verifyRazorpayPayment,
   validateCoupon,
   applyMasterCode,
+  applySignedActivationToken,
 } from '../../utils/api';
 
 const RAZORPAY_SCRIPT_URL = 'https://checkout.razorpay.com/v1/checkout.js';
@@ -439,6 +440,19 @@ function SubscriptionPageContent() {
                    setCouponApplying(true);
                    setCouponMessage(null);
                    setCouponPreview(null);
+
+                   // If the user pasted a signed activation token (contains a dot),
+                   // attempt to apply it locally and persist it for later reconciliation.
+                   const trimmed = couponCode.trim();
+                   if (trimmed.includes('.') && applySignedActivationToken(trimmed)) {
+                     setCouponMessage('Signed activation token applied locally (offline). Will reconcile when online.');
+                     setCouponPreview({ code: '[signed-token]', master: true });
+                     setCouponApplying(false);
+                     // trigger a subscription refresh to reflect local change
+                     refreshSubscription();
+                     return;
+                   }
+
                    const resp = await validateCoupon(couponCode.trim());
                    if (resp && resp.coupon) {
                      setCouponPreview(resp.coupon);

@@ -775,6 +775,7 @@ export function applyMasterCode(code) {
       accountEmail,
       data: subscription,
       timestamp: Date.now(),
+      mechanism: 'client_master_code',
     };
     window.localStorage.setItem('subscription_data', JSON.stringify(payload));
     // Notify other parts of the app to re-read subscription cache
@@ -783,6 +784,85 @@ export function applyMasterCode(code) {
   } catch (e) {
     return false;
   }
+}
+
+/**
+ * Apply a server-issued signed activation token locally (offline) and persist
+ * the token for later reconciliation. The token payload is base64-encoded JSON
+ * with a server-side signature; the client does not verify the signature but
+ * decodes the payload to populate a local subscription preview.
+ * Returns true when a local subscription was applied.
+ */
+export function applySignedActivationToken(token) {
+  if (typeof window === 'undefined' || !token) return false;
+  try {
+    const parts = String(token).trim().split('.');
+    if (parts.length < 2) return false;
+    const payloadB64 = parts[0];
+    // Restore padding and decode
+    const pad = '='.repeat((-payloadB64.length) % 4);
+    const json = atob(payloadB64.replace(/-/g, '+').replace(/_/g, '/') + pad);
+    const payload = JSON.parse(json);
+    const tier = payload.grant_tier || 'basic';
+    const subscription = {
+      tier,
+      status: 'active',
+      interviews_used_this_month: 0,
+      interviews_remaining: payload.grant_unlimited ? 'unlimited' : payload.monthly_limit || 'unlimited',
+      monthly_limit: payload.grant_unlimited ? 'unlimited' : (payload.monthly_limit || 'unlimited'),
+      features: [],
+      subscription_start_date: new Date().toISOString(),
+      subscription_end_date: payload.grant_unlimited ? null : null,
+      activated_via_master_token: true,
+      token_preview: { code: payload.code, iat: payload.iat, exp: payload.exp },
+    };
+
+    const accountEmail = window.localStorage.getItem('auth_email') || '__authenticated__';
+    const store = { accountEmail, data: subscription, timestamp: Date.now(), mechanism: 'signed_master_token' };
+    window.localStorage.setItem('subscription_data', JSON.stringify(store));
+    // Save token for later reconciliation when online
+    try { window.localStorage.setItem('master_activation_token', token); } catch (e) { /* ignore */ }
+    try { window.dispatchEvent(new CustomEvent('app:master-code-applied', { detail: { token_preview: payload } })); } catch (e) { window.dispatchEvent(new Event('app:master-code-applied')); }
+    return true;
+  } catch (e) {
+    console.warn('Failed to apply signed activation token locally:', e?.message || e);
+    return false;
+  }
+}
+
+/**
+ * If a signed activation token is stored locally, attempt to reconcile it
+ * with the backend by POSTing to /api/subscription/master-token/consume. On
+ * success remove the stored token and refresh subscription state.
+ */
+export async function reconcileActivationToken() {
+  if (typeof window === 'undefined') return;
+  const token = window.localStorage.getItem('master_activation_token');
+  if (!token) return;
+  const authToken = window.localStorage.getItem('auth_token');
+  if (!authToken) return; // must be signed in to reconcile
+
+  try {
+    const resp = await api.post('/api/subscription/master-token/consume', { token });
+    if (resp && resp.data && resp.data.status === 'success') {
+      // token consumed successfully on server; remove local copy
+      try { window.localStorage.removeItem('master_activation_token'); } catch (e) { /* ignore */ }
+      // Refresh subscription cache/state
+      try { window.dispatchEvent(new Event('app:master-token-consumed')); } catch (e) { /* ignore */ }
+      // Trigger a background revalidation of subscription status
+      try { api.get('/api/subscription/status', { timeout: REQUEST_TIMEOUTS.subscriptionStatus }).then((r) => { setCachedData(getCacheKey('GET', '/api/subscription/status'), r.data, CACHE_TTL.default); }).catch(() => {}); } catch (e) {}
+      return true;
+    }
+  } catch (e) {
+    // If server rejects token (invalid/expired) remove local token to avoid repeated attempts
+    const status = e?.response?.status;
+    const serverMsg = e?.response?.data?.error || e?.message || '';
+    console.warn('Failed to reconcile activation token with server:', status, serverMsg);
+    if (status === 400 || status === 403) {
+      try { window.localStorage.removeItem('master_activation_token'); } catch (er) { /* ignore */ }
+    }
+  }
+  return false;
 }
 
 

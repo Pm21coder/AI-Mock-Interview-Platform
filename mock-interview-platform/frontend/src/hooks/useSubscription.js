@@ -4,6 +4,7 @@ import {
   getSubscriptionStatus,
   invalidateAllSubscriptionCaches,
   invalidateQuestionCategoriesCache,
+  reconcileActivationToken,
 } from '../utils/api';
 
 const STORAGE_KEY = 'subscription_data';
@@ -221,6 +222,14 @@ export function useSubscription() {
 
       const cached = getCachedSubscription(email);
       if (cached) applySubscription(cached);
+
+      // Attempt to reconcile any locally stored signed activation token when online.
+      try {
+        void reconcileActivationToken();
+      } catch (e) {
+        // ignore reconciliation failures here; fetchSubscription will still run
+      }
+
       void fetchSubscription();
     }, 0);
 
@@ -235,11 +244,21 @@ export function useSubscription() {
       }
     }
 
+    function onOnline() {
+      try {
+        void reconcileActivationToken();
+      } catch (e) {
+        // ignore
+      }
+    }
+
     window.addEventListener('app:master-code-applied', onMasterCode);
+    window.addEventListener('online', onOnline);
 
     return () => {
       window.clearTimeout(initialLoad);
       window.removeEventListener('app:master-code-applied', onMasterCode);
+      window.removeEventListener('online', onOnline);
     };
   }, [applySubscription, email, fetchSubscription, isAuthenticated]);
 
