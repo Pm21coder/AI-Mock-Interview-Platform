@@ -209,10 +209,12 @@ export function invalidateAllSubscriptionCaches() {
 }
 
 const api = axios.create({
-  // Keep browser requests same-origin. Next.js rewrites /api/* to the backend
-  // using NEXT_PUBLIC_API_URL, so this works for local development and
-  // deployments without exposing the browser to CORS origin differences.
-  baseURL: '',
+  // Use NEXT_PUBLIC_API_URL when provided so client can call backend directly
+  // in environments where the Next.js proxy is not configured. Fall back to
+  // same-origin '' for local development where rewrites are convenient.
+  baseURL: (typeof process !== 'undefined' && process.env && process.env.NEXT_PUBLIC_API_URL)
+    ? process.env.NEXT_PUBLIC_API_URL
+    : '',
   // Increase default axios timeout to accommodate long-running AI requests
   timeout: 120_000,
   headers: {
