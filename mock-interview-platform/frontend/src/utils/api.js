@@ -633,16 +633,29 @@ export const getDashboardStats = async (options = { forceRefresh: false }) => {
 
     const errorDetails = {
       message: error?.message || serializedError?.message || 'Unknown request error',
-      status: error?.response?.status ?? serializedError?.status,
-      statusText: error?.response?.statusText,
-      data: error?.response?.data,
-      code: error?.code,
-      method: error?.config?.method,
-      url: error?.config?.url,
+      status: error?.response?.status ?? serializedError?.status ?? null,
+      statusText: error?.response?.statusText ?? null,
+      data: error?.response?.data ?? null,
+      code: error?.code ?? null,
+      method: error?.config?.method ?? null,
+      url: error?.config?.url ?? null,
     };
 
-    console.error('getDashboardStats error:', errorDetails);
-    if (serializedError) console.debug('getDashboardStats Axios error:', serializedError);
+    // Ensure we log a stable, inspectable representation — some consoles
+    // display empty objects if all properties are undefined. Stringify to be
+    // explicit and also provide the original Axios error when available.
+    try {
+      console.error('getDashboardStats error:', JSON.parse(JSON.stringify(errorDetails)));
+    } catch (e) {
+      // Fallback if stringify fails for some reason
+      console.error('getDashboardStats error (raw):', error || serializedError || 'Unknown');
+    }
+
+    if (serializedError) {
+      console.debug('getDashboardStats Axios error:', serializedError);
+    } else if (error) {
+      console.debug('getDashboardStats raw error object:', error);
+    }
 
     // Notify the app that a network issue occurred (non-fatal)
     if (!error?.response) {
