@@ -514,13 +514,7 @@ export const submitAnswer = async (data, options = {}) => {
   while (attempt < maxAttempts) {
     attempt += 1;
     try {
-      const payload = {
-        action: 'analyze_answer',
-        prompt: data?.answer || data?.transcript || data?.text || '',
-        params: data,
-      };
-
-      const response = await api.post('/api/interview', payload, {
+      const response = await api.post('/api/interview/analyze-answer', data, {
         timeout,
         validateStatus: (s) => s < 500,
         signal: options.signal,
@@ -549,7 +543,7 @@ export const submitAnswer = async (data, options = {}) => {
       }
 
       // Non-retriable or final failure: log structured error and map to friendly object
-      logApiError('/api/interview (analyze_answer)', err);
+      logApiError('/api/interview/analyze-answer', err);
 
       // Map common cases to structured responses callers can use
       if (isTimeout) {
@@ -567,7 +561,7 @@ export const submitAnswer = async (data, options = {}) => {
   }
 
   // If we exit loop, return the last error mapped
-  logApiError('/api/interview (analyze_answer)', lastError || new Error('Unknown error'));
+  logApiError('/api/interview/analyze-answer', lastError || new Error('Unknown error'));
   return { error: 'Analysis failed', details: lastError?.message || 'Unknown error' };
 };
 
