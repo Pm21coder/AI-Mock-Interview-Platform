@@ -608,18 +608,37 @@ export const getDashboardStats = async (options = { forceRefresh: false }) => {
       invalidateDashboardStatsCache();
     }
 
-    // If we are currently in a cooldown window (due to recent 429), return cached or guest fallback
+    // If we are currently in a cooldown window (due to recent 429), return cached or guest/demo fallback
     if (now < _dashboardCooldownUntil) {
       console.warn('Dashboard stats request suppressed due to upstream rate limit until', new Date(_dashboardCooldownUntil).toISOString());
       if (_cachedDashboardStats && (now - _cachedDashboardTs) < (DASHBOARD_CACHE_TTL * 10)) {
         // Return slightly stale cached data during cooldown
         return _cachedDashboardStats;
       }
-      // Provide graceful guest fallback if no cache present
+
+      // Provide demo data to unauthenticated visitors, and an empty payload for signed-in users
+      const signedIn = (typeof window !== 'undefined') && !!window.localStorage.getItem('auth_token');
+      if (signedIn) {
+        return {
+          fallback: true,
+          rate_limited: true,
+          stats: { interviews_completed: 0, average_score: 0, confidence_score: 0 },
+          recent_interviews: [],
+        };
+      }
+
+      // Demo payload for guests
       return {
         fallback: true,
-        stats: { interviews_completed: 0, average_score: 0, confidence_score: 0 },
-        recent_interviews: [],
+        demo: true,
+        stats: { interviews_completed: 18, average_score: 82, confidence_score: 88 },
+        recent_interviews: [
+          { role: 'Software Engineer', score: 88, date: '2026-08-01', confidence: 90 },
+          { role: 'Product Manager', score: 79, date: '2026-07-29', confidence: 85 },
+          { role: 'Data Analyst', score: 91, date: '2026-07-24', confidence: 92 },
+          { role: 'UX Designer', score: 75, date: '2026-07-20', confidence: 80 },
+          { role: 'DevOps Engineer', score: 85, date: '2026-07-15', confidence: 88 },
+        ],
         rate_limited: true,
       };
     }
@@ -720,10 +739,16 @@ export const getDashboardStats = async (options = { forceRefresh: false }) => {
     // Ensure we log a stable, inspectable representation — some consoles
     // display empty objects if all properties are undefined. Stringify to be
     // explicit and also provide the original Axios error when available.
-    // Network and fallback cases are expected when the backend is temporarily
-    // unavailable; do not treat them as hard runtime failures in the console.
-    if (isResourceNotFound || isNetworkFailure) {
-      console.warn('getDashboardStats endpoint unavailable; using fallback stats.', safeErrorDetails);
+    // Treat common transient conditions (network, 404, and rate-limiting) as
+    // non-fatal and avoid surfacing them as error-level console messages.
+    const isRateLimited = (safeErrorDetails && safeErrorDetails.status === 429) || error?.response?.status === 429;
+
+    if (isResourceNotFound || isNetworkFailure || isRateLimited) {
+      if (isRateLimited) {
+        console.warn('getDashboardStats rate-limited; using cached or rate-limited fallback.', safeErrorDetails);
+      } else {
+        console.warn('getDashboardStats endpoint unavailable; using fallback stats.', safeErrorDetails);
+      }
     } else {
       // Stringify to ensure consoles display useful information even when
       // the error object has only non-enumerable properties (Axios errors).
@@ -753,13 +778,46 @@ export const getDashboardStats = async (options = { forceRefresh: false }) => {
     if (error?.response?.status === 429) {
       console.warn('Dashboard stats rate-limited by backend. Serving cached or rate_limited fallback.');
       if (_cachedDashboardStats) return _cachedDashboardStats;
-      return { fallback: true, rate_limited: true, stats: { interviews_completed: 0, average_score: 0, confidence_score: 0 }, recent_interviews: [] };
+      const signedIn = (typeof window !== 'undefined') && !!window.localStorage.getItem('auth_token');
+      if (signedIn) {
+        return { fallback: true, rate_limited: true, stats: { interviews_completed: 0, average_score: 0, confidence_score: 0 }, recent_interviews: [] };
+      }
+      return {
+        fallback: true,
+        demo: true,
+        rate_limited: true,
+        stats: {
+          interviews_completed: 18,
+          average_score: 82,
+          confidence_score: 88,
+        },
+        recent_interviews: [
+          { role: 'Software Engineer', score: 88, date: '2026-08-01', confidence: 90 },
+          { role: 'Product Manager', score: 79, date: '2026-07-29', confidence: 85 },
+          { role: 'Data Analyst', score: 91, date: '2026-07-24', confidence: 92 },
+          { role: 'UX Designer', score: 75, date: '2026-07-20', confidence: 80 },
+          { role: 'DevOps Engineer', score: 85, date: '2026-07-15', confidence: 88 },
+        ],
+      };
     }
 
     if (!error?.response) {
       console.warn('Dashboard stats API unavailable (network error), using guest fallback payload.', error?.message || error);
+      const signedIn = (typeof window !== 'undefined') && !!window.localStorage.getItem('auth_token');
+      if (signedIn) {
+        return {
+          fallback: true,
+          stats: {
+            interviews_completed: 0,
+            average_score: 0,
+            confidence_score: 0,
+          },
+          recent_interviews: [],
+        };
+      }
       return {
         fallback: true,
+        demo: true,
         stats: {
           interviews_completed: 18,
           average_score: 82,
@@ -777,8 +835,21 @@ export const getDashboardStats = async (options = { forceRefresh: false }) => {
 
     if (error.response?.status >= 500) {
       console.warn('Dashboard stats API returned 5xx error, using guest fallback payload.');
+      const signedIn = (typeof window !== 'undefined') && !!window.localStorage.getItem('auth_token');
+      if (signedIn) {
+        return {
+          fallback: true,
+          stats: {
+            interviews_completed: 0,
+            average_score: 0,
+            confidence_score: 0,
+          },
+          recent_interviews: [],
+        };
+      }
       return {
         fallback: true,
+        demo: true,
         stats: {
           interviews_completed: 18,
           average_score: 82,

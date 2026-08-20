@@ -77,5 +77,22 @@
     ],
     "updated_at": "2026-08-20 15:58:39.800252",
     "history_synced_at": "2026-08-20 15:58:39.800252"
+  },
+  "demo_c04d924b-d6ef-43f8-bac7-100573abddba": {
+    "user_id": "demo_c04d924b-d6ef-43f8-bac7-100573abddba",
+    "interviews_completed": 1,
+    "average_score": 65,
+    "confidence_score": 75,
+    "total_responses": 5,
+    "recent_interviews": [
+      {
+        "role": "AI Engineer",
+        "score": 65,
+        "date": "2026-08-20T18:14:11.425843",
+        "confidence": 75
+      }
+    ],
+    "updated_at": "2026-08-20 18:20:09.002382",
+    "history_synced_at": "2026-08-20 18:20:09.002382"
   }
 }
