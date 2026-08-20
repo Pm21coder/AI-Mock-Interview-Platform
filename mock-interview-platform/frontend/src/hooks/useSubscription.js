@@ -91,8 +91,11 @@ function requestSubscription(accountKey) {
 }
 
 /** Clear the current user's subscription and dependent API caches. */
-export function invalidateSubscriptionCache() {
+export function invalidateSubscriptionCache(accountKeyOverride) {
   if (typeof window === 'undefined') return;
+
+  const accountKey = accountKeyOverride || window.localStorage.getItem('auth_email') || '__authenticated__';
+  swrCache.delete(accountKey);
   window.localStorage.removeItem(STORAGE_KEY);
   invalidateAllSubscriptionCaches();
 }
@@ -124,7 +127,10 @@ export function useSubscription() {
 
     subscriptionTierRef.current = data?.tier || null;
     setSubscription(data);
-    cacheSubscription(data, email);
+    if (email) {
+      swrCache.set(email, { data, timestamp: Date.now() });
+      cacheSubscription(data, email);
+    }
   }, [email]);
 
   const fetchSubscription = useCallback(async () => {
@@ -237,8 +243,17 @@ export function useSubscription() {
     // immediate subscription access without requiring a network call.
     function onMasterCode() {
       try {
-        const cached = getCachedSubscription(email);
-        if (cached) applySubscription(cached);
+        const accountKey = email || window.localStorage.getItem('auth_email') || '__authenticated__';
+        swrCache.delete(accountKey);
+        const cached = getCachedSubscription(accountKey);
+        if (cached) {
+          applySubscription(cached);
+        } else {
+          const fallback = JSON.parse(window.localStorage.getItem(STORAGE_KEY) || 'null');
+          if (fallback?.data) {
+            applySubscription(fallback.data);
+          }
+        }
       } catch (e) {
         // ignore
       }

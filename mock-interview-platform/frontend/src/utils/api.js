@@ -697,11 +697,19 @@ export const getDashboardStats = async (options = { forceRefresh: false }) => {
 
     const safeErrorDetails = toSafeErrorDetails(error || serializedError || null);
     const isResourceNotFound = (safeErrorDetails.status === 404) || (safeErrorDetails.message || '').toLowerCase().includes('resource not found');
+    const isNetworkFailure = !error?.response && (
+      (error?.code === 'ERR_NETWORK') ||
+      (safeErrorDetails.message || '').toLowerCase().includes('network error') ||
+      (safeErrorDetails.message || '').toLowerCase().includes('failed to fetch') ||
+      (safeErrorDetails.message || '').toLowerCase().includes('timeout')
+    );
 
     // Ensure we log a stable, inspectable representation — some consoles
     // display empty objects if all properties are undefined. Stringify to be
     // explicit and also provide the original Axios error when available.
-    if (isResourceNotFound) {
+    // Network and fallback cases are expected when the backend is temporarily
+    // unavailable; do not treat them as hard runtime failures in the console.
+    if (isResourceNotFound || isNetworkFailure) {
       console.warn('getDashboardStats endpoint unavailable; using fallback stats.', safeErrorDetails);
     } else {
       // Stringify to ensure consoles display useful information even when
