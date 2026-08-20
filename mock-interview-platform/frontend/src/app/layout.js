@@ -4,6 +4,7 @@ import { Toaster } from 'react-hot-toast';
 import { Analytics } from '@vercel/analytics/next';
 import { SITE_URL } from './site';
 import CookieBanner from '../components/CookieBanner';
+import NetworkIssueBanner from '../components/NetworkIssueBanner';
 
 export const metadata = {
   metadataBase: new URL(SITE_URL),
@@ -96,6 +97,7 @@ export default function RootLayout({ children }) {
         {/* End Google Tag Manager (noscript) */}
         <GoogleTagManager gtmId="GT-NB3Z6ML3" />
         <GoogleAnalytics gaId="G-NDXBR2Z82J" />
+        <NetworkIssueBanner />
         {children}
         <Toaster position="top-right" reverseOrder={false} />
         <Analytics />
