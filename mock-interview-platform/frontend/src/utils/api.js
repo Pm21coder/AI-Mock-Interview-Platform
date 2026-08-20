@@ -186,6 +186,33 @@ function invalidResumeIdError(resumeId) {
   return error;
 }
 
+// Notify the application about a transient network issue so UI components
+// can listen and display a user-visible hint (non-blocking). We dispatch a
+// CustomEvent 'app:network-issue' and also persist a short-lived record in
+// localStorage for debugging/visibility across tabs.
+function notifyNetworkIssue(details) {
+  try {
+    if (typeof window === 'undefined') return;
+    const payload = {
+      ts: Date.now(),
+      details,
+    };
+    try {
+      window.localStorage.setItem('last_network_issue', JSON.stringify(payload));
+    } catch (e) {
+      // ignore storage failures
+    }
+    try {
+      const ev = new CustomEvent('app:network-issue', { detail: payload });
+      window.dispatchEvent(ev);
+    } catch (e) {
+      // CustomEvent may fail in older browsers — ignore
+    }
+  } catch (e) {
+    // non-fatal
+  }
+}
+
 function getCacheKey(method, url, params) {
   const paramStr = params ? JSON.stringify(params) : '';
   return `${method}:${url}:${paramStr}`;
@@ -617,6 +644,15 @@ export const getDashboardStats = async (options = { forceRefresh: false }) => {
     console.error('getDashboardStats error:', errorDetails);
     if (serializedError) console.debug('getDashboardStats Axios error:', serializedError);
 
+    // Notify the app that a network issue occurred (non-fatal)
+    if (!error?.response) {
+      try {
+        notifyNetworkIssue({ endpoint: '/api/interview/dashboard-stats', message: error?.message });
+      } catch (e) {
+        // ignore
+      }
+    }
+
     // Handle rate limiting explicitly: return cached or a rate-limited fallback
     if (error?.response?.status === 429) {
       console.warn('Dashboard stats rate-limited by backend. Serving cached or rate_limited fallback.');
@@ -698,6 +734,11 @@ export const getResumeHistory = async () => {
     return response.data;
   } catch (error) {
     logApiError('/api/resume/history', error);
+    try {
+      if (!error?.response) notifyNetworkIssue({ endpoint: '/api/resume/history', message: error?.message });
+    } catch (e) {
+      // ignore
+    }
     throw error;
   }
 };
