@@ -922,6 +922,12 @@ class SubscriptionService:
                 'expires_at': coupon.get('expires_at'),
                 'max_uses': coupon.get('max_uses'),
                 'uses': coupon.get('uses', 0),
+                # Include master-coupon specific fields so callers (e.g. verify-payment)
+                # can honor behaviors like grant_unlimited and grant_tier even when
+                # the coupon is defined in the fallback JSON file.
+                'grant_unlimited': coupon.get('grant_unlimited', False),
+                'grant_tier': coupon.get('grant_tier'),
+                'subscription_monthly_limit': coupon.get('subscription_monthly_limit'),
             }
         except Exception as e:
             logger.error(f'Failed to read coupon info for {code}: {e}')

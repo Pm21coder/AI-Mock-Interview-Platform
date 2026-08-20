@@ -170,6 +170,13 @@ def create_razorpay_order():
         discount_percent = subscription_service.validate_and_redeem_coupon(coupon_code)
         if discount_percent is None:
             return jsonify({'error': 'Invalid or expired coupon code'}), 400
+        # Also fetch full coupon metadata (works for Mongo or fallback file) and
+        # persist it with the order so verification need not re-query external
+        # stores during the webhook/verify step.
+        try:
+            coupon_meta = subscription_service.get_coupon_info(coupon_code)
+        except Exception:
+            coupon_meta = None
         # Compute discounted amount (paise)
         try:
             discounted_amount = int(round(amount * (100 - discount_percent) / 100.0))
@@ -179,6 +186,8 @@ def create_razorpay_order():
             amount = discounted_amount
         except Exception:
             return jsonify({'error': 'Failed to apply coupon'}), 500
+    else:
+        coupon_meta = None
 
     # Demo/test-mode has been removed. Require real Razorpay credentials
     # to create an order. If Razorpay is not configured, return an explicit
@@ -233,6 +242,7 @@ def create_razorpay_order():
         'created_at': utc_now(),
         'coupon_code': coupon_code,
         'discount_percent': discount_percent,
+        'coupon_meta': coupon_meta,
     }
     # Keep an in-memory map for short-lived verification flows when MongoDB is
     # temporarily unavailable. This is not a test/demo fallback for production.
@@ -317,14 +327,28 @@ def verify_razorpay_payment():
 
     # --- Activate subscription ---
     if tier in ['basic', 'pro']:
-        # Optionally fetch coupon metadata so special coupon behaviors (e.g., master unlimited) can be honored
+        # Prefer coupon metadata attached to the order to avoid re-reading
+        # external stores during verification. Fall back to DB/file lookups only
+        # if order doesn't include it.
         coupon_doc = None
         coupon_code = order_record.get('coupon_code')
-        if coupon_code and is_mongo_available():
-            try:
-                coupon_doc = mongo.db.coupons.find_one({'code': coupon_code})
-            except Exception:
-                coupon_doc = None
+        # If the order_record already persisted coupon metadata (from create-order), use it
+        if order_record.get('coupon_meta'):
+            coupon_doc = order_record.get('coupon_meta')
+        elif coupon_code:
+            # Prefer Mongo if available
+            if is_mongo_available():
+                try:
+                    coupon_doc = mongo.db.coupons.find_one({'code': coupon_code})
+                except Exception:
+                    coupon_doc = None
+            # If not found in Mongo, consult the subscription service which
+            # will read fallback master coupons from disk when applicable.
+            if not coupon_doc:
+                try:
+                    coupon_doc = subscription_service.get_coupon_info(coupon_code)
+                except Exception:
+                    coupon_doc = None
 
         activated_in_mongo = False
         if is_mongo_available():
