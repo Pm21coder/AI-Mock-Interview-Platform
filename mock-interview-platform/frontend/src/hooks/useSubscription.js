@@ -7,7 +7,7 @@ import {
 } from '../utils/api';
 
 const STORAGE_KEY = 'subscription_data';
-const CACHE_DURATION = 60 * 1000; // Show cached data instantly; revalidate every minute.
+const CACHE_DURATION = 5 * 60 * 1000; // Show cached data instantly; revalidate every 5 minutes to avoid server rate limiting.
 const inFlightRequests = new Map();
 // Simple SWR-style in-memory cache keyed by accountEmail
 const swrCache = new Map(); // key -> { data, timestamp }
@@ -99,7 +99,7 @@ export function invalidateSubscriptionCache() {
 /**
  * Read subscription details with a cache-first, network-revalidated strategy.
  * Cached data makes navigation immediate; the status endpoint remains the
- * source of truth and is revalidated on mount, on demand, and every minute.
+ * source of truth and is revalidated on mount, on demand, and every 5 minutes.
  */
 export function useSubscription() {
   const { isAuthenticated, email } = useAuth();
@@ -111,6 +111,8 @@ export function useSubscription() {
   const backoffUntilRef = useRef(0); // timestamp (ms) until which polling is suppressed
   const backoffMsRef = useRef(60 * 1000); // initial backoff 1 minute
   const [isUsingBackoffCache, setIsUsingBackoffCache] = useState(false); // shows UI when cached due to backoff
+  // Track time of last successful or attempted fetch to avoid duplicate triggers
+  const lastFetchRef = useRef(0);
 
   const applySubscription = useCallback((data) => {
     if (subscriptionTierRef.current && data?.tier && subscriptionTierRef.current !== data.tier) {
@@ -140,15 +142,24 @@ export function useSubscription() {
     }
     setError(null);
 
-    // If we're currently in a backoff period due to previous 429, avoid hitting the server
+      // If we're currently in a backoff period due to previous 429, avoid hitting the server
     if (Date.now() < backoffUntilRef.current) {
       console.warn('[useSubscription] Skipping fetch due to backoff until', new Date(backoffUntilRef.current).toISOString());
       setLoading(false);
       setIsUsingBackoffCache(true);
       return cached;
     }
+    // Prevent rapid consecutive fetches (e.g., multiple focus/pageshow events)
+    if (lastFetchRef.current && Date.now() - lastFetchRef.current < 10 * 1000) {
+      // If we recently fetched within 10s, skip this redundant fetch
+      console.debug('[useSubscription] Skipping fetch - recent fetch occurred', Date.now() - lastFetchRef.current, 'ms ago');
+      setLoading(false);
+      return cached;
+    }
 
     try {
+      // mark fetch attempt time to avoid duplicate triggers from focus/pageshow
+      lastFetchRef.current = Date.now();
       const data = await requestSubscription(email || '__authenticated__');
       if (!data || data.error) {
         throw new Error(data?.error || 'Failed to load subscription');
