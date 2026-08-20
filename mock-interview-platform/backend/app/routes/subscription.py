@@ -472,7 +472,7 @@ def validate_coupon():
                 log_path = _json.dumps(debug) + "\n"
                 # Append to debug log in repository's temp folder
                 try:
-                    log_file = os.path.join(os.path.dirname(__file__), '..', '..', 'debug_coupon_validation.log')
+                    log_file = os.path.join(os.path.dirname(__file__), '..', '..', 'logs', 'coupon_validation_debug.log')
                     with open(log_file, 'a', encoding='utf-8') as lf:
                         lf.write(log_path)
                 except Exception:
@@ -501,7 +501,11 @@ def validate_coupon():
                     'code': info.get('code')
                 }
             }
-            log_file = os.path.join(os.path.dirname(__file__), '..', '..', 'debug_coupon_validation.log')
+            log_file = os.path.join(os.path.dirname(__file__), '..', '..', 'logs', 'coupon_validation_debug.log')
+            try:
+                os.makedirs(os.path.dirname(log_file), exist_ok=True)
+            except Exception:
+                pass
             with open(log_file, 'a', encoding='utf-8') as lf:
                 lf.write(_json.dumps(debug) + "\n")
         except Exception:
@@ -522,7 +526,11 @@ def validate_coupon():
                 'result': 'exception',
                 'error': str(e)
             }
-            log_file = os.path.join(os.path.dirname(__file__), '..', '..', 'debug_coupon_validation.log')
+            log_file = os.path.join(os.path.dirname(__file__), '..', '..', 'logs', 'coupon_validation_debug.log')
+            try:
+                os.makedirs(os.path.dirname(log_file), exist_ok=True)
+            except Exception:
+                pass
             with open(log_file, 'a', encoding='utf-8') as lf:
                 lf.write(_json.dumps(debug) + "\n")
         except Exception:
