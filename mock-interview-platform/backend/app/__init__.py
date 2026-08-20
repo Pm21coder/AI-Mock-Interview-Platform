@@ -181,6 +181,7 @@ def create_app(config_class=Config):
     from app.routes.subscription import subscription_bp
     from app.routes.ai import ai_bp
     from app.services.email_service import email_bp
+    from app.routes.health import health_bp
     from app.socket_events import register_socket_handlers
 
     app.register_blueprint(interview_bp, url_prefix='/api/interview')
@@ -190,6 +191,7 @@ def create_app(config_class=Config):
     app.register_blueprint(subscription_bp, url_prefix='/api/subscription')
     app.register_blueprint(ai_bp, url_prefix='/api/ai')
     app.register_blueprint(email_bp)
+    app.register_blueprint(health_bp, url_prefix='/api')
 
     # Register Socket.IO event handlers for real-time dashboard updates.
     register_socket_handlers()

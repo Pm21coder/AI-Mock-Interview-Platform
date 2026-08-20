@@ -432,17 +432,37 @@ def verify_razorpay_payment():
 @token_required
 def validate_coupon():
     """Validate a coupon code without redeeming it. Returns discount info
-    and metadata so the frontend can preview discounted prices."""
-    data = request.get_json(silent=True) or {}
-    coupon_code = (data.get('coupon_code') or '').strip() or None
+    and metadata so the frontend can preview discounted prices.
+
+    Adds extra debug logging to help diagnose 'Resource not found' frontend
+    errors and network failures by recording the incoming request and the
+    coupon code being validated.
+    """
+    try:
+        data = request.get_json(silent=True) or {}
+    except Exception:
+        data = {}
+
+    coupon_code = (data.get('coupon_code') or '')
+    coupon_code = coupon_code.strip() if isinstance(coupon_code, str) else None
+
+    current_app.logger.info('validate-coupon called from %s with coupon_code=%s', request.remote_addr, bool(coupon_code))
+
     if not coupon_code:
+        current_app.logger.warning('validate-coupon missing coupon_code payload. Full body: %s', data)
         return jsonify({'error': 'Missing coupon_code'}), 400
 
-    info = subscription_service.get_coupon_info(coupon_code)
-    if not info:
-        return jsonify({'error': 'Invalid or expired coupon code'}), 400
+    try:
+        info = subscription_service.get_coupon_info(coupon_code)
+        if not info:
+            current_app.logger.info('validate-coupon: code not found or expired: %s', coupon_code)
+            return jsonify({'error': 'Invalid or expired coupon code'}), 400
 
-    return jsonify({'coupon': info}), 200
+        current_app.logger.info('validate-coupon: found coupon %s (grant_unlimited=%s, grant_tier=%s)', info.get('code'), info.get('grant_unlimited'), info.get('grant_tier'))
+        return jsonify({'coupon': info}), 200
+    except Exception as e:
+        current_app.logger.exception('Error validating coupon %s: %s', coupon_code, e)
+        return jsonify({'error': 'Internal server error during coupon validation'}), 500
 
 @subscription_bp.route('/cancel', methods=['POST'])
 @token_required
