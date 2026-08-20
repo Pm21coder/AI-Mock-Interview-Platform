@@ -14,6 +14,7 @@ from app.utils.auth import token_required
 from app.utils.mongo_state import is_mongo_available, mark_mongo_unavailable
 from app.utils.time import utc_now
 from app.cache_utils import cache_response, optimize_response
+from app.socket_events import emit_interview_usage_update
 from flask_limiter.util import get_remote_address
 
 # Use per-user key when available to avoid IP-based 429s for authenticated users
@@ -261,6 +262,12 @@ def create_razorpay_order():
                     )
                 except Exception:
                     pass
+
+                # Notify connected clients so the activation reflects everywhere
+                try:
+                    emit_interview_usage_update(str(current_user['_id']), subscription, None)
+                except Exception:
+                    current_app.logger.exception('Failed to emit subscription activation socket event')
 
                 return jsonify({'status': 'success', 'activated': True, 'subscription': subscription}), 200
             except Exception as e:
