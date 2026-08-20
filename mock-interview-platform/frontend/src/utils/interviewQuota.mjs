@@ -2,8 +2,14 @@ export function canStartInterview(subscription = {}) {
   const tier = subscription.tier || 'free';
   const monthlyLimit = subscription.monthly_limit;
   const interviewsRemaining = subscription.interviews_remaining;
+  const isUnlimited =
+    monthlyLimit === 'unlimited' ||
+    monthlyLimit === Infinity ||
+    monthlyLimit === null ||
+    monthlyLimit === undefined ||
+    interviewsRemaining === 'unlimited';
 
-  if (monthlyLimit === 'unlimited' || monthlyLimit === Infinity) {
+  if (isUnlimited) {
     return { allowed: true, reason: null };
   }
 

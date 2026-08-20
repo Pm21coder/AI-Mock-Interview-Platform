@@ -70,17 +70,27 @@ def _razorpay_order_error_response(exc):
     return jsonify({'error': 'Razorpay could not create the order'}), 500
 
 
+def _is_unlimited_monthly_limit(value):
+    """Normalize the multiple legacy representations used for unlimited plans."""
+    return value is None or value == float('inf') or value == 'unlimited'
+
+
+def _serialize_monthly_limit(value):
+    """Return a JSON-safe value for monthly quota display."""
+    return 'unlimited' if _is_unlimited_monthly_limit(value) else value
+
+
 def _subscription_status_payload(tier, status='active', interviews_used=0,
                                  start_date=None, end_date=None):
     """Build the subscription status response for Mongo and fallback users."""
     plan_info = Config.SUBSCRIPTION_TIERS.get(tier, Config.SUBSCRIPTION_TIERS['free'])
     monthly_limit = plan_info['monthly_interviews']
-    interviews_remaining = (
-        max(0, monthly_limit - interviews_used)
-        if monthly_limit != float('inf')
-        else 'unlimited'
-    )
-    monthly_limit_response = monthly_limit if monthly_limit != float('inf') else 'unlimited'
+    if _is_unlimited_monthly_limit(monthly_limit):
+        interviews_remaining = 'unlimited'
+        monthly_limit_response = 'unlimited'
+    else:
+        interviews_remaining = max(0, monthly_limit - interviews_used)
+        monthly_limit_response = monthly_limit
 
     return {
         'tier': tier,
@@ -111,9 +121,17 @@ def _store_fallback_subscription(user_id, tier, razorpay_order_id=None,
 
 @subscription_bp.route('/plans', methods=['GET'])
 def get_plans():
-    """Get all available subscription plans"""
+    """Get all available subscription plans."""
+    normalized_plans = {}
+    for tier_name, tier_data in Config.SUBSCRIPTION_TIERS.items():
+        normalized_tier = dict(tier_data)
+        normalized_tier['monthly_interviews'] = _serialize_monthly_limit(
+            tier_data.get('monthly_interviews')
+        )
+        normalized_plans[tier_name] = normalized_tier
+
     return jsonify({
-        'plans': Config.SUBSCRIPTION_TIERS
+        'plans': normalized_plans
     }), 200
 
 

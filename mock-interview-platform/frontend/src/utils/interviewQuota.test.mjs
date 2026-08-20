@@ -13,3 +13,8 @@ test('allows interview start when the plan still has interviews left', () => {
   assert.equal(result.allowed, true);
   assert.equal(result.reason, null);
 });
+
+test('allows unlimited plans even when the quota is represented as null or unlimited', () => {
+  assert.equal(canStartInterview({ tier: 'pro', monthly_limit: null, interviews_remaining: null }).allowed, true);
+  assert.equal(canStartInterview({ tier: 'pro', monthly_limit: 'unlimited', interviews_remaining: 'unlimited' }).allowed, true);
+});

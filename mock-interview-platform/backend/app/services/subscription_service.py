@@ -7,6 +7,7 @@ Handles subscription lifecycle, usage tracking, billing history, and feature acc
 from datetime import datetime, timedelta
 from enum import Enum
 import logging
+import math
 
 # Lazy/robust mongo proxy to allow unit tests to patch nested attributes
 # even when the PyMongo instance hasn't been initialized yet.
@@ -77,6 +78,17 @@ class SubscriptionService:
         self._status_cache_ttl_seconds = getattr(Config, 'SUBSCRIPTION_STATUS_CACHE_TTL', 5)
         self._category_cache = {}
         self._category_cache_ttl_seconds = getattr(Config, 'QUESTION_CATEGORY_CACHE_TTL', 15)
+
+    @staticmethod
+    def _is_unlimited_limit(limit):
+        """Normalize unlimited-plan markers across legacy and current storage formats."""
+        if limit is None:
+            return True
+        if isinstance(limit, str):
+            return limit.lower() == 'unlimited'
+        if isinstance(limit, float):
+            return math.isinf(limit)
+        return False
 
     def invalidate_cache(self, user_id):
         """Clear cached subscription and category data for a user."""
@@ -160,19 +172,16 @@ class SubscriptionService:
         plan_info = self.config_tiers.get(tier, self.config_tiers['free'])
         # Allow user-level override for monthly limit (used for master/unlimited coupons)
         monthly_limit = user.get('subscription_monthly_limit', plan_info.get('monthly_interviews'))
+        is_unlimited = self._is_unlimited_limit(monthly_limit)
 
-        interviews_remaining = (
-            max(0, monthly_limit - interviews_used)
-            if monthly_limit is not None
-            else 'unlimited'
-        )
+        interviews_remaining = 'unlimited' if is_unlimited else max(0, monthly_limit - interviews_used)
 
         result = {
            'tier': tier,
            'status': status,
            'interviews_used_this_month': interviews_used,
            'interviews_remaining': interviews_remaining,
-           'monthly_limit': monthly_limit if monthly_limit is not None else 'unlimited',
+           'monthly_limit': 'unlimited' if is_unlimited else monthly_limit,
            'features': plan_info['features'],
            'subscription_start_date': start_date,
            'subscription_end_date': end_date,
