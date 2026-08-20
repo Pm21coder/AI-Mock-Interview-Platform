@@ -9,6 +9,7 @@ import {
   createRazorpayOrder,
   verifyRazorpayPayment,
   validateCoupon,
+  applyMasterCode,
 } from '../../utils/api';
 
 const RAZORPAY_SCRIPT_URL = 'https://checkout.razorpay.com/v1/checkout.js';
@@ -446,8 +447,28 @@ function SubscriptionPageContent() {
                      setCouponMessage('Coupon looks invalid');
                    }
                  } catch (err) {
-                   setCouponMessage(err.message || 'Invalid or expired coupon code');
-                   setCouponPreview(null);
+                   // Try offline master-code activation as a fallback when network is unavailable
+                   let handled = false;
+                   try {
+                     const isNetworkError = !err.response;
+                     if (isNetworkError) {
+                       const applied = applyMasterCode(couponCode.trim());
+                       if (applied) {
+                         setCouponMessage('Master code applied locally (offline). Subscription activated until next sync.');
+                         setCouponPreview({ code: couponCode.trim(), master: true });
+                         handled = true;
+                         // trigger a subscription refresh to reflect local change
+                         refreshSubscription();
+                       }
+                     }
+                   } catch (e) {
+                     // ignore
+                   }
+
+                   if (!handled) {
+                     setCouponMessage(err.message || 'Invalid or expired coupon code');
+                     setCouponPreview(null);
+                   }
                  } finally {
                    setCouponApplying(false);
                  }
