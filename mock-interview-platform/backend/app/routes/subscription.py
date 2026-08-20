@@ -189,6 +189,67 @@ def create_razorpay_order():
     else:
         coupon_meta = None
 
+    # If the coupon grants an immediate unlimited subscription for this tier,
+    # activate the subscription without creating a Razorpay order. Master codes
+    # are intended to bypass payment and directly grant access.
+    if coupon_meta and coupon_meta.get('grant_unlimited'):
+        grant_tier = coupon_meta.get('grant_tier')
+        if not grant_tier or grant_tier == tier:
+            try:
+                # If Mongo is available, create subscription through the service which will
+                # persist to Mongo. Otherwise create an in-memory fallback subscription
+                # and rely on subscription_service.get_user_subscription to read it.
+                if is_mongo_available():
+                    subscription = subscription_service.create_subscription(
+                        current_user['_id'], tier, razorpay_order_id=None, razorpay_payment_id=None, coupon_code=coupon_code
+                    )
+                    # Ensure unlimited representation (end_date=None, monthly_limit=None)
+                    try:
+                        mongo.db.users.update_one(
+                            {'_id': current_user['_id']},
+                            {'$set': {'subscription_end_date': None, 'subscription_monthly_limit': None}}
+                        )
+                    except Exception as exc:
+                        mark_mongo_unavailable(exc)
+                else:
+                    fallback_subscriptions[str(current_user['_id'])] = {
+                        'tier': tier,
+                        'status': 'active',
+                        'interviews_used_this_month': 0,
+                        'subscription_start_date': utc_now(),
+                        'subscription_end_date': None,
+                        'razorpay_order_id': None,
+                        'razorpay_payment_id': None,
+                        'subscription_monthly_limit': None,
+                    }
+                    # Build a best-effort subscription payload representing unlimited
+                    plan_info = Config.SUBSCRIPTION_TIERS.get(tier, Config.SUBSCRIPTION_TIERS['free'])
+                    subscription = {
+                        'tier': tier,
+                        'status': 'active',
+                        'interviews_used_this_month': 0,
+                        'interviews_remaining': 'unlimited',
+                        'monthly_limit': 'unlimited',
+                        'features': plan_info.get('features'),
+                        'subscription_start_date': fallback_subscriptions[str(current_user['_id'])]['subscription_start_date'],
+                        'subscription_end_date': None,
+                        'plan_info': plan_info,
+                        'is_trial': False,
+                    }
+
+                # Log as a completed activation via master coupon
+                try:
+                    audit_logger.log_payment_completed(
+                        current_user['_id'], tier, 0, None, None, 'master_coupon'
+                    )
+                except Exception:
+                    pass
+
+                return jsonify({'status': 'success', 'activated': True, 'subscription': subscription}), 200
+            except Exception as e:
+                current_app.logger.exception('Failed to activate subscription via master coupon: %s', e)
+                return jsonify({'error': 'Failed to activate subscription with master coupon'}), 500
+
     # Demo/test-mode has been removed. Require real Razorpay credentials
     # to create an order. If Razorpay is not configured, return an explicit
     # error so administrators can correct the deployment configuration.

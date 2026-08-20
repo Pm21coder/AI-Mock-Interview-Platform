@@ -37,6 +37,18 @@ def test_master_codes_activate_unlimited():
         rv_order = client.post('/api/subscription/create-order', json={'tier': expected_tier, 'coupon_code': code}, headers=headers)
         assert rv_order.status_code == 200, f"create-order failed: {rv_order.get_data(as_text=True)}"
         order_data = rv_order.get_json()
+
+        # If create-order activated directly, it will return {'activated': True, 'subscription': ...}
+        if order_data.get('activated'):
+            # Assert subscription reflects unlimited grant
+            assert order_data.get('subscription')
+            sub = order_data.get('subscription')
+            assert sub.get('tier') == expected_tier
+            assert sub.get('subscription_end_date') is None
+            assert sub.get('monthly_limit') == 'unlimited'
+            continue
+
+        # Otherwise proceed with the original Razorpay flow
         order_id = order_data.get('order_id')
         assert order_id
 
