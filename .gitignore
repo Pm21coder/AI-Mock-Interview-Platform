@@ -1,3 +1,6 @@
 .env
 .env.local
 *.log
+
+# Ignore backend local env
+mock-interview-platform/backend/.env
