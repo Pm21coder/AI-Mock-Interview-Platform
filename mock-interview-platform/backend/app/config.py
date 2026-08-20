@@ -183,3 +183,10 @@ class Config:
     # Optionally hint at provider name (e.g., 'deepseek') for logging/metrics
     LLM_PROVIDER = os.getenv('LLM_PROVIDER', '')
 
+    # Master token signing secret used to issue short-lived signed activation
+    # tokens for secure offline activation. Must be set in backend/.env in
+    # production and kept secret. Default is intentionally empty so tests must
+    # provide the value explicitly.
+    MASTER_TOKEN_SECRET = os.getenv('MASTER_TOKEN_SECRET', '')
+
+

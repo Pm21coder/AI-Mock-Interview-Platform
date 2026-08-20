@@ -1029,3 +1029,136 @@ def create_coupon():
     except Exception as e:
         current_app.logger.exception('Failed to create coupon')
         return jsonify({'error': str(e)}), 500
+
+
+# --- Signed master-token endpoints for secure offline activation ---
+def _sign_master_payload(payload_dict):
+    """Return compact token: base64url(payload_json) + '.' + hex(hmac)."""
+    import json as _json
+    import base64 as _base64
+    secret = Config.MASTER_TOKEN_SECRET or ''
+    payload_json = _json.dumps(payload_dict, separators=(',', ':'), sort_keys=True)
+    payload_b64 = _base64.urlsafe_b64encode(payload_json.encode('utf-8')).decode('utf-8').rstrip('=')
+    sig = hmac.new(secret.encode('utf-8'), payload_b64.encode('utf-8'), hashlib.sha256).hexdigest()
+    return f"{payload_b64}.{sig}"
+
+
+def _verify_master_token(token):
+    """Return (payload_dict, error_message) where payload_dict is None on failure."""
+    import json as _json
+    import base64 as _base64
+    secret = Config.MASTER_TOKEN_SECRET or ''
+    if not token or '.' not in token:
+        return None, 'Malformed token'
+    try:
+        payload_b64, sig = token.rsplit('.', 1)
+        expected = hmac.new(secret.encode('utf-8'), payload_b64.encode('utf-8'), hashlib.sha256).hexdigest()
+        if not hmac.compare_digest(expected, sig):
+            return None, 'Invalid signature'
+        # restore padding
+        padding = '=' * (-len(payload_b64) % 4)
+        payload_json = _base64.urlsafe_b64decode(payload_b64 + padding).decode('utf-8')
+        payload = _json.loads(payload_json)
+        # check expiry
+        exp = int(payload.get('exp', 0))
+        if exp and utc_now().timestamp() > exp:
+            return None, 'Token expired'
+        return payload, None
+    except Exception as e:
+        current_app.logger.exception('Failed verifying master token: %s', e)
+        return None, 'Token verification failed'
+
+
+@subscription_bp.route('/master-token/generate', methods=['POST'])
+@token_required
+def master_token_generate():
+    """Admin-only endpoint to issue a short-lived signed activation token for a master coupon.
+
+    Payload: { coupon_code: str, target_email?: str, expires_seconds?: int }
+    Returns: { token: str }
+    """
+    current_user = _get_current_user()
+    if not current_user or not current_user.get('is_admin'):
+        return jsonify({'error': 'Admin privileges required'}), 403
+
+    data = request.get_json(silent=True) or {}
+    coupon_code = (data.get('coupon_code') or '').strip()
+    target_email = data.get('target_email') or ''
+    expires_seconds = int(data.get('expires_seconds') or 3600)
+
+    if not coupon_code:
+        return jsonify({'error': 'Missing coupon_code'}), 400
+
+    # Ensure this coupon exists and grants unlimited activation
+    try:
+        info = subscription_service.get_coupon_info(coupon_code)
+    except Exception:
+        info = None
+
+    if not info or not info.get('grant_unlimited'):
+        return jsonify({'error': 'Coupon not found or not eligible for master token'}), 400
+
+    payload = {
+        'code': info.get('code'),
+        'grant_tier': info.get('grant_tier'),
+        'grant_unlimited': True,
+        'email': target_email or '',
+        'iat': int(utc_now().timestamp()),
+        'exp': int((utc_now() + timedelta(seconds=expires_seconds)).timestamp()),
+    }
+    token = _sign_master_payload(payload)
+    return jsonify({'token': token}), 200
+
+
+@subscription_bp.route('/master-token/consume', methods=['POST'])
+@token_required
+def master_token_consume():
+    """Consume a signed master activation token and activate the subscription for the current user.
+
+    Body: { token: str }
+    """
+    current_user = _get_current_user()
+    data = request.get_json(silent=True) or {}
+    token = (data.get('token') or '').strip()
+    if not token:
+        return jsonify({'error': 'Missing token'}), 400
+
+    payload, err = _verify_master_token(token)
+    if err:
+        return jsonify({'error': err}), 400
+
+    # If token targets a specific email, ensure it matches the current user
+    target_email = payload.get('email') or ''
+    if target_email:
+        if str(current_user.get('email') or '').lower() != str(target_email).lower():
+            return jsonify({'error': 'Token not valid for this user'}), 400
+
+    # Activate subscription server-side using existing logic
+    tier = payload.get('grant_tier') or 'basic'
+    try:
+        if is_mongo_available():
+            subscription = subscription_service.create_subscription(current_user['_id'], tier, razorpay_order_id=None, razorpay_payment_id=None, coupon_code=payload.get('code'))
+            # Ensure unlimited representation
+            try:
+                mongo.db.users.update_one({'_id': current_user['_id']}, {'$set': {'subscription_end_date': None, 'subscription_monthly_limit': None}})
+            except Exception:
+                pass
+        else:
+            fallback_subscriptions[str(current_user['_id'])] = {
+                'tier': tier,
+                'status': 'active',
+                'interviews_used_this_month': 0,
+                'subscription_start_date': utc_now(),
+                'subscription_end_date': None,
+                'razorpay_order_id': None,
+                'razorpay_payment_id': None,
+                'subscription_monthly_limit': None,
+            }
+        try:
+            audit_logger.log_payment_completed(current_user['_id'], tier, 0, None, None, 'master_token')
+        except Exception:
+            pass
+        return jsonify({'status': 'success', 'activated': True, 'tier': tier}), 200
+    except Exception as e:
+        current_app.logger.exception('Failed to activate subscription from master token: %s', e)
+        return jsonify({'error': 'Failed to activate from token'}), 500
