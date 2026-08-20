@@ -7,14 +7,28 @@ let socket = null;
  * The connection is authenticated with the user's JWT token so the
  * backend can route dashboard updates to the correct user room.
  */
+function getSocketBaseUrl() {
+  if (typeof window === 'undefined') return '';
+
+  const configured = (
+    typeof process !== 'undefined' &&
+    process.env &&
+    typeof process.env.NEXT_PUBLIC_API_URL === 'string' &&
+    process.env.NEXT_PUBLIC_API_URL.trim()
+  ) ? process.env.NEXT_PUBLIC_API_URL.trim() : '';
+
+  return configured ? configured.replace(/\/$/, '') : window.location.origin;
+}
+
 export function getSocket() {
   if (socket) return socket;
 
   const token = typeof window !== 'undefined' ? window.localStorage.getItem('auth_token') : null;
 
-  // Connect through the Next.js proxy to avoid CORS issues. The proxy in
-  // next.config.js forwards /socket.io/* to the backend.
-  const socketUrl = window.location.origin;
+  // Prefer the configured backend origin when present so realtime dashboard
+  // updates continue to work in non-proxied deployments. Otherwise, use the
+  // current origin so local Next.js rewrites remain transparent.
+  const socketUrl = getSocketBaseUrl();
 
   socket = io(socketUrl, {
     path: '/socket.io',

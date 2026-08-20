@@ -314,13 +314,26 @@ export function invalidateAllSubscriptionCaches() {
   invalidateQuestionCategoriesCache();
 }
 
+export function getApiBaseUrl() {
+  const configured = (
+    typeof process !== 'undefined' &&
+    process.env &&
+    typeof process.env.NEXT_PUBLIC_API_URL === 'string' &&
+    process.env.NEXT_PUBLIC_API_URL.trim()
+  ) ? process.env.NEXT_PUBLIC_API_URL.trim() : '';
+
+  if (configured) {
+    return configured.replace(/\/$/, '');
+  }
+
+  return typeof window !== 'undefined' ? window.location.origin : '';
+}
+
 const api = axios.create({
-  // Use NEXT_PUBLIC_API_URL when provided so client can call backend directly
-  // in environments where the Next.js proxy is not configured. Fall back to
-  // same-origin '' for local development where rewrites are convenient.
-  baseURL: (typeof process !== 'undefined' && process.env && process.env.NEXT_PUBLIC_API_URL)
-    ? process.env.NEXT_PUBLIC_API_URL
-    : (typeof window !== 'undefined' ? window.location.origin : ''),
+  // Use NEXT_PUBLIC_API_URL when provided so client can call the backend
+  // directly in production or non-proxied environments. Fall back to the
+  // current origin so local dev can still rely on Next.js rewrites.
+  baseURL: getApiBaseUrl(),
   // Increase default axios timeout to accommodate long-running AI requests
   timeout: 120_000,
   headers: {
