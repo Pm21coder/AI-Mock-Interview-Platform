@@ -14,6 +14,18 @@ from app.utils.auth import token_required
 from app.utils.mongo_state import is_mongo_available, mark_mongo_unavailable
 from app.utils.time import utc_now
 from app.cache_utils import cache_response, optimize_response
+from flask_limiter.util import get_remote_address
+from flask import request
+
+# Use per-user key when available to avoid IP-based 429s for authenticated users
+def _user_or_ip_key():
+    try:
+        user = getattr(request, 'current_user', None)
+        if user and user.get('_id'):
+            return str(user.get('_id'))
+    except Exception:
+        pass
+    return get_remote_address()
 
 subscription_bp = Blueprint('subscription', __name__)
 subscription_service = SubscriptionService()
@@ -107,6 +119,7 @@ def get_plans():
 
 
 @subscription_bp.route('/status', methods=['GET'])
+@limiter.limit("60 per minute", key_func=_user_or_ip_key)
 @token_required
 def get_subscription_status():
     """Get current user's subscription status"""
