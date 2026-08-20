@@ -472,8 +472,12 @@ def validate_coupon():
                 log_path = _json.dumps(debug) + "\n"
                 # Append to debug log in repository's temp folder
                 try:
-                    log_file = os.path.join(os.path.dirname(__file__), '..', '..', 'logs', 'coupon_validation_debug.log')
-                    with open(log_file, 'a', encoding='utf-8') as lf:
+                    from pathlib import Path as _Path
+                    base = _Path(__file__).resolve().parents[2]
+                    log_dir = base / 'logs'
+                    log_dir.mkdir(parents=True, exist_ok=True)
+                    log_file_path = log_dir / 'coupon_validation_debug.log'
+                    with open(str(log_file_path), 'a', encoding='utf-8') as lf:
                         lf.write(log_path)
                 except Exception:
                     # If writing file fails, still proceed — the main logger captured an event
@@ -501,13 +505,16 @@ def validate_coupon():
                     'code': info.get('code')
                 }
             }
-            log_file = os.path.join(os.path.dirname(__file__), '..', '..', 'logs', 'coupon_validation_debug.log')
             try:
-                os.makedirs(os.path.dirname(log_file), exist_ok=True)
+                from pathlib import Path as _Path
+                base = _Path(__file__).resolve().parents[2]
+                log_dir = base / 'logs'
+                log_dir.mkdir(parents=True, exist_ok=True)
+                log_file_path = log_dir / 'coupon_validation_debug.log'
+                with open(str(log_file_path), 'a', encoding='utf-8') as lf:
+                    lf.write(_json.dumps(debug) + "\n")
             except Exception:
                 pass
-            with open(log_file, 'a', encoding='utf-8') as lf:
-                lf.write(_json.dumps(debug) + "\n")
         except Exception:
             pass
         return jsonify({'coupon': info}), 200
@@ -526,13 +533,16 @@ def validate_coupon():
                 'result': 'exception',
                 'error': str(e)
             }
-            log_file = os.path.join(os.path.dirname(__file__), '..', '..', 'logs', 'coupon_validation_debug.log')
             try:
-                os.makedirs(os.path.dirname(log_file), exist_ok=True)
+                from pathlib import Path as _Path
+                base = _Path(__file__).resolve().parents[2]
+                log_dir = base / 'logs'
+                log_dir.mkdir(parents=True, exist_ok=True)
+                log_file_path = log_dir / 'coupon_validation_debug.log'
+                with open(str(log_file_path), 'a', encoding='utf-8') as lf:
+                    lf.write(_json.dumps(debug) + "\n")
             except Exception:
                 pass
-            with open(log_file, 'a', encoding='utf-8') as lf:
-                lf.write(_json.dumps(debug) + "\n")
         except Exception:
             pass
         return jsonify({'error': 'Internal server error during coupon validation'}), 500
