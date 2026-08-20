@@ -135,20 +135,44 @@ function logApiError(endpoint, error) {
     const isDev = typeof process !== 'undefined' && process.env && process.env.NODE_ENV !== 'production';
 
     // If this is a network error (no response), asynchronously probe the health endpoint
-    // to help determine whether the backend is reachable from the browser.
+    // to help determine whether the backend is reachable from the browser. Also log
+    // the axios baseURL and current window origin to surface misconfiguration issues.
     if (!serialized.status && typeof window !== 'undefined') {
+      try {
+        console.debug('getDashboardStats network diagnostics: api.defaults.baseURL =', api?.defaults?.baseURL, 'window.location.origin =', window.location.origin);
+      } catch (diagErr) {
+        // ignore
+      }
+
       (async () => {
         try {
           const base = api?.defaults?.baseURL || '';
           const healthPath = base.endsWith('/') ? `${base}api/health` : `${base}/api/health`;
+          // Also build an absolute probe URL when base is relative/empty
+          const absoluteHealthPath = healthPath.startsWith('/') ? `${window.location.origin}${healthPath}` : healthPath;
+
           const controller = new AbortController();
           const id = setTimeout(() => controller.abort(), 3000);
-          const res = await fetch(healthPath, { method: 'GET', cache: 'no-store', signal: controller.signal });
-          clearTimeout(id);
-          if (res.ok) {
-            console.debug(`Backend health check OK at ${healthPath}`);
-          } else {
-            console.warn(`Backend health check returned ${res.status} at ${healthPath}`);
+          try {
+            const res = await fetch(absoluteHealthPath, { method: 'GET', cache: 'no-store', signal: controller.signal });
+            clearTimeout(id);
+            if (res.ok) {
+              console.debug(`Backend health check OK at ${absoluteHealthPath}`);
+            } else {
+              console.warn(`Backend health check returned ${res.status} at ${absoluteHealthPath}`);
+            }
+          } catch (firstErr) {
+            // If relative probe failed, try the raw healthPath as a last resort
+            try {
+              const res2 = await fetch(healthPath, { method: 'GET', cache: 'no-store' });
+              if (res2.ok) {
+                console.debug(`Backend health check OK at ${healthPath}`);
+              } else {
+                console.warn(`Backend health check returned ${res2.status} at ${healthPath}`);
+              }
+            } catch (probeErr) {
+              console.warn('Backend health checks failed:', firstErr?.message || firstErr, probeErr?.message || probeErr);
+            }
           }
         } catch (probeErr) {
           console.warn('Backend health check failed to reach server:', probeErr?.message || probeErr);
