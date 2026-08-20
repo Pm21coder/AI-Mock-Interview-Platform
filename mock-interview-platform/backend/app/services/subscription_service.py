@@ -407,7 +407,9 @@ class SubscriptionService:
                 {'$inc': {'interviews_used_this_month': 1}}
             )
 
-            if result.matched_count > 0:
+            # Some PyMongo proxies or test doubles may return None — handle safely
+            matched = getattr(result, 'matched_count', 0) if result is not None else 0
+            if matched > 0:
                 user = mongo.db.users.find_one({'_id': user_id})
                 new_count = user.get('interviews_used_this_month', 0)
                 self.invalidate_cache(user_id)
@@ -419,8 +421,49 @@ class SubscriptionService:
                     self._send_usage_warning(user_id, sub)
 
                 return new_count
+
+            # If no DB document matched, try fallback for demo/local accounts
+            if str(user_id).startswith('demo_'):
+                try:
+                    local = self._find_local_user(user_id)
+                    if local:
+                        email, user_record, users = local
+                        try:
+                            user_record['interviews_used_this_month'] = int(user_record.get('interviews_used_this_month', 0)) + 1
+                        except Exception:
+                            user_record['interviews_used_this_month'] = 1
+                        self._save_local_user(email, user_record, users)
+                        self.invalidate_cache(user_id)
+
+                        # Check limit warning for local user
+                        sub = self.get_user_subscription(user_id)
+                        remaining = sub['interviews_remaining']
+                        if isinstance(remaining, int) and remaining <= 2:
+                            self._send_usage_warning(user_id, sub)
+
+                        return user_record['interviews_used_this_month']
+                except Exception as lf_exc:
+                    logger.warning('Failed to update local demo user interview count for %s: %s', user_id, lf_exc)
+
+            logger.warning('No matching user document found to increment interviews for user %s', user_id)
         except Exception as e:
             logger.error(f'Error incrementing interview count for user {user_id}: {e}')
+
+            # On exception, attempt local demo fallback before giving up
+            if str(user_id).startswith('demo_'):
+                try:
+                    local = self._find_local_user(user_id)
+                    if local:
+                        email, user_record, users = local
+                        try:
+                            user_record['interviews_used_this_month'] = int(user_record.get('interviews_used_this_month', 0)) + 1
+                        except Exception:
+                            user_record['interviews_used_this_month'] = 1
+                        self._save_local_user(email, user_record, users)
+                        self.invalidate_cache(user_id)
+                        return user_record['interviews_used_this_month']
+                except Exception:
+                    pass
 
         return 1
 

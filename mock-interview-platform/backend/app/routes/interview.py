@@ -332,16 +332,45 @@ def analyze_answer():
         # Attach request id to allow frontend <-> backend correlation
         combined_feedback['req_id'] = req_id
         response_record = {'question_index': question_index, 'answer': answer, 'feedback': combined_feedback}
-        if session_id in demo_sessions:
-            demo_sessions[session_id]['responses'].append(response_record)
+        # Try to persist response to MongoDB first (best-effort). If that fails
+        # or no interview document was matched, fall back to in-memory demo_sessions
+        # so the frontend can still retrieve feedback via /get-feedback.
+        mongo_failed = False
         if user_id != 'guest':
             try:
-                mongo.db.interviews.update_one(
+                result = mongo.db.interviews.update_one(
                     {'_id': session_id, 'user_id': user_id},
                     {'$push': {'responses': response_record}},
                 )
+                # Some PyMongo proxies or test doubles may return None — handle safely
+                if not result or getattr(result, 'matched_count', 0) == 0:
+                    mongo_failed = True
             except Exception as db_exc:
                 logger.warning(f'Failed to update interview in DB: {db_exc}')
+                mongo_failed = True
+        else:
+            # Guest users persist only to demo_sessions
+            mongo_failed = True
+
+        if mongo_failed:
+            # Ensure a demo session exists for this session_id and append the response
+            try:
+                sess = demo_sessions.get(session_id)
+                if not sess:
+                    demo_sessions[session_id] = {
+                        '_id': session_id,
+                        'user_id': user_id,
+                        'job_role': data.get('job_role') or data.get('role') or 'N/A',
+                        'questions': [],
+                        'created_at': utc_now(),
+                        'responses': [response_record],
+                        'feedback': [],
+                    }
+                else:
+                    sess.setdefault('responses', []).append(response_record)
+            except Exception as mem_exc:
+                logger.warning(f'Failed to append response to in-memory demo_sessions: {mem_exc}')
+
         return jsonify(combined_feedback)
     except Exception as exc:
         error_msg = str(exc)
@@ -413,6 +442,36 @@ def get_feedback(session_id):
             interview = mongo.db.interviews.find_one({'_id': session_id, 'user_id': current_user_id()})
         except Exception:
             interview = None
+
+    # If the interview document is missing, try to recover from the separate
+    # `responses` collection. Some clients persist responses there instead of
+    # updating the interview document atomically; reconstruct a minimal
+    # interview object so feedback can still be computed and returned.
+    if not interview and current_user_id() != 'guest':
+        try:
+            resp_docs = list(mongo.db.responses.find({'session_id': session_id, 'user_id': current_user_id()}))
+            if resp_docs:
+                # Normalize response docs into the interview structure expected
+                reconstructed_responses = []
+                for r in resp_docs:
+                    reconstructed_responses.append({
+                        'question_index': r.get('question_index'),
+                        'answer': r.get('response'),
+                        'feedback': r.get('feedback') or {},
+                    })
+                interview = {
+                    '_id': session_id,
+                    'user_id': current_user_id(),
+                    'job_role': 'N/A',
+                    'questions': [],
+                    'created_at': utc_now(),
+                    'responses': reconstructed_responses,
+                    'feedback': [],
+                }
+        except Exception:
+            # If this lookup fails, we'll fall through to the error response
+            pass
+
     if not interview:
         return jsonify({'error': 'Session not found'}), 404
 

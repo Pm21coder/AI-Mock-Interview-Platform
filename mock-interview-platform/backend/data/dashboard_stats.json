@@ -43,5 +43,32 @@
     "recent_interviews": [],
     "updated_at": "2026-08-19 15:12:35.057665",
     "history_synced_at": "2026-08-19 15:12:35.057665"
+  },
+  "demo_testing": {
+    "user_id": "demo_testing",
+    "interviews_completed": 1,
+    "average_score": 0,
+    "confidence_score": 75,
+    "total_responses": 1,
+    "recent_interviews": [
+      {
+        "role": "Software Engineer",
+        "score": 0,
+        "date": "2026-08-20T06:51:39.431887",
+        "confidence": 75
+      }
+    ],
+    "updated_at": "2026-08-20 06:51:57.213291",
+    "history_synced_at": "2026-08-20 06:51:57.213291"
+  },
+  "demo_3439b588-3f34-4b07-ae37-f4eab0a5ef85": {
+    "user_id": "demo_3439b588-3f34-4b07-ae37-f4eab0a5ef85",
+    "interviews_completed": 0,
+    "average_score": 0,
+    "confidence_score": 0,
+    "total_responses": 0,
+    "recent_interviews": [],
+    "updated_at": "2026-08-20 06:58:15.673787",
+    "history_synced_at": "2026-08-20 06:58:15.673787"
   }
 }
