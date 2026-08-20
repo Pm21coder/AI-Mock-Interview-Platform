@@ -506,6 +506,13 @@ def verify_razorpay_payment():
             fallback_razorpay_orders[razorpay_order_id]['status'] = 'paid'
             fallback_razorpay_orders[razorpay_order_id]['payment_id'] = razorpay_payment_id
 
+    # Notify connected clients about the subscription change so it reflects everywhere
+    try:
+        subscription = subscription_service.get_user_subscription(current_user['_id'])
+        emit_interview_usage_update(str(current_user['_id']), subscription, None)
+    except Exception:
+        current_app.logger.exception('Failed to emit subscription activation socket event after payment verification')
+
     return jsonify({
         'status': 'success',
         'message': 'Payment verified successfully',
@@ -711,6 +718,12 @@ def upgrade_subscription():
             razorpay_payment_id=data.get('razorpay_payment_id'),
             coupon_code=(data.get('coupon_code') or '').strip() or None,
         )
+        # Notify connected clients about the upgraded subscription
+        try:
+            emit_interview_usage_update(str(current_user['_id']), subscription, None)
+        except Exception:
+            current_app.logger.exception('Failed to emit subscription update socket event on upgrade')
+
         return jsonify({
             'message': f'Successfully upgraded to {new_tier} plan',
             'subscription': subscription
