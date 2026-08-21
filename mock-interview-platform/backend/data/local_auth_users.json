@@ -12,14 +12,14 @@
   },
   "new_cycle@example.com": {
     "email": "new_cycle@example.com",
-    "password_hash": "$2b$12$DcY8mupdri8Vx7Farsnkr.kAh3swYtaaBZS5y2aKNN5ZxvPqziy0a",
-    "created_at": "2026-08-20 16:25:36.998807",
+    "password_hash": "$2b$12$V0LIHNLXWBVxv0DGIKMkPeRnhAJiDjq0kP90SamwrQld71iTCaKE.",
+    "created_at": "2026-08-21 04:54:56.708637",
     "subscription_tier": "free",
     "subscription_status": "active",
-    "subscription_start_date": "2026-08-20 16:25:36.998807",
-    "subscription_end_date": "2026-09-19 16:25:36.998807",
+    "subscription_start_date": "2026-08-21 04:54:56.708637",
+    "subscription_end_date": "2026-09-20 04:54:56.708637",
     "interviews_used_this_month": 0,
-    "_id": "demo_a465d044-b1f3-4cd7-8c48-e241f50e1b39"
+    "_id": "demo_9bdc4d24-1d18-4af5-9a92-a098cb6024c4"
   },
   "pramodmane09156@gmail.com": {
     "email": "pramodmane09156@gmail.com",
@@ -29,7 +29,73 @@
     "subscription_status": "active",
     "subscription_start_date": "2026-08-20 17:53:59.048307",
     "subscription_end_date": "2026-09-19 17:53:59.048307",
-    "interviews_used_this_month": 1,
+    "interviews_used_this_month": 3,
     "_id": "demo_c04d924b-d6ef-43f8-bac7-100573abddba"
+  },
+  "integration.master+1787267296@example.com": {
+    "email": "integration.master+1787267296@example.com",
+    "password_hash": "$2b$12$1bf.qhmfwL/0J/9j8vnYjuG6y8HVYFTeFFXMPbTFavvgEJJE8EXsO",
+    "created_at": "2026-08-21 04:38:16.384819",
+    "subscription_tier": "free",
+    "subscription_status": "active",
+    "subscription_start_date": "2026-08-21 04:38:16.384819",
+    "subscription_end_date": "2026-09-20 04:38:16.384819",
+    "interviews_used_this_month": 0,
+    "_id": "demo_ca3cf626-7de6-454e-a7e7-8c9b857ceb54"
+  },
+  "integration.master+1787267502@example.com": {
+    "email": "integration.master+1787267502@example.com",
+    "password_hash": "$2b$12$wdZv2mKnkksv047pDyJIqeSfq7HoucQiKIY957xIgsH5cZ.iz9dS.",
+    "created_at": "2026-08-21 04:41:42.049881",
+    "subscription_tier": "free",
+    "subscription_status": "active",
+    "subscription_start_date": "2026-08-21 04:41:42.049881",
+    "subscription_end_date": "2026-09-20 04:41:42.049881",
+    "interviews_used_this_month": 0,
+    "_id": "demo_bf99c4d3-069a-4b65-95c5-862f38640735"
+  },
+  "integration.master+1787268138@example.com": {
+    "email": "integration.master+1787268138@example.com",
+    "password_hash": "$2b$12$Ca3fFmsMzbdq4acBFaulv.QXgGBufogpmKVgWVcsbFNrHGaMe/Yp6",
+    "created_at": "2026-08-21 04:52:18.110481",
+    "subscription_tier": "free",
+    "subscription_status": "active",
+    "subscription_start_date": "2026-08-21 04:52:18.110481",
+    "subscription_end_date": "2026-09-20 04:52:18.110481",
+    "interviews_used_this_month": 0,
+    "_id": "demo_95e18a11-2dc4-457c-9e5f-042fd40ee79a"
+  },
+  "verify.payment+1787268266@example.com": {
+    "email": "verify.payment+1787268266@example.com",
+    "password_hash": "$2b$12$/1cr7eWoyfL6gF0FXWiKZuSDyen238cYA6rbPK0r8KMiYFEaHPkbq",
+    "created_at": "2026-08-21 04:54:26.472934",
+    "subscription_tier": "free",
+    "subscription_status": "active",
+    "subscription_start_date": "2026-08-21 04:54:26.472934",
+    "subscription_end_date": "2026-09-20 04:54:26.472934",
+    "interviews_used_this_month": 0,
+    "_id": "demo_1f8a4810-fcee-4572-b933-2d7c942a10dd"
+  },
+  "verify.payment+1787268306@example.com": {
+    "email": "verify.payment+1787268306@example.com",
+    "password_hash": "$2b$12$gyEeFeR4ZZQ655sAIUYX3uwGSQon3RBwXupZ3/i/VjdOHS6n/FqhW",
+    "created_at": "2026-08-21 04:55:06.505330",
+    "subscription_tier": "free",
+    "subscription_status": "active",
+    "subscription_start_date": "2026-08-21 04:55:06.505330",
+    "subscription_end_date": "2026-09-20 04:55:06.505330",
+    "interviews_used_this_month": 0,
+    "_id": "demo_33bbba5a-c963-4f8c-9e27-4cdf3d578f72"
+  },
+  "integration.master+1787268311@example.com": {
+    "email": "integration.master+1787268311@example.com",
+    "password_hash": "$2b$12$xMpTTUk3kHZMIwgr9.91CePsC.vo.xBhS9wC.6KmH5VAZmCXEa.g.",
+    "created_at": "2026-08-21 04:55:11.544278",
+    "subscription_tier": "free",
+    "subscription_status": "active",
+    "subscription_start_date": "2026-08-21 04:55:11.544278",
+    "subscription_end_date": "2026-09-20 04:55:11.544278",
+    "interviews_used_this_month": 0,
+    "_id": "demo_8bb4fe75-a4c2-4ffa-96ab-f3c9eb4b36ca"
   }
 }

@@ -1103,8 +1103,29 @@ export const createRazorpayOrder = async (data) => {
 };
 
 export const verifyRazorpayPayment = async (data) => {
-  const response = await api.post('/api/subscription/verify-payment', data);
-  return response.data;
+  try {
+    const response = await api.post('/api/subscription/verify-payment', data);
+    if (response?.data?.status === 'success' && typeof window !== 'undefined') {
+      window.localStorage.removeItem('subscription_data');
+      invalidateQuestionCategoriesCache();
+      try {
+        window.dispatchEvent(new CustomEvent('app:subscription-updated', {
+          detail: response.data.subscription || null,
+        }));
+      } catch (e) {
+        window.dispatchEvent(new Event('app:subscription-updated'));
+      }
+    }
+    return response.data;
+  } catch (error) {
+    const status = error?.response?.status;
+    const respData = error?.response?.data;
+    const serverMsg = respData?.error || respData?.message || error?.message || 'Payment verification failed';
+    const out = new Error(serverMsg);
+    out.status = status;
+    out.response = error?.response;
+    throw out;
+  }
 };
 
 export const cancelSubscription = async () => {

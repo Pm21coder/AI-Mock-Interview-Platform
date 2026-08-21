@@ -473,7 +473,7 @@ def verify_razorpay_payment():
                 )
             except Exception:
                 pass
-            
+             
             # Log successful payment
             amount = order_record.get('amount', 0)
             audit_logger.log_payment_completed(
@@ -502,6 +502,8 @@ def verify_razorpay_payment():
                 razorpay_payment_id, 'success'
             )
 
+        subscription_service.invalidate_cache(current_user['_id'])
+
         if razorpay_order_id in fallback_razorpay_orders:
             fallback_razorpay_orders[razorpay_order_id]['status'] = 'paid'
             fallback_razorpay_orders[razorpay_order_id]['payment_id'] = razorpay_payment_id
@@ -513,10 +515,13 @@ def verify_razorpay_payment():
     except Exception:
         current_app.logger.exception('Failed to emit subscription activation socket event after payment verification')
 
+    subscription = subscription_service.get_user_subscription(current_user['_id'])
+
     return jsonify({
         'status': 'success',
         'message': 'Payment verified successfully',
         'tier': tier,
+        'subscription': subscription,
     }), 200
 
 

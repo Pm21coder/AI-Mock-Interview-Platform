@@ -4,7 +4,7 @@ import { Suspense, useState, useEffect, useCallback } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Navigation from '../../components/Navigation';
 import { useInterviewSync, useSubscriptionSync } from '../../hooks/useInterviewSync';
-import { useSubscription } from '../../hooks/useSubscription';
+import { useSubscription, invalidateSubscriptionCache } from '../../hooks/useSubscription';
 import {
   createRazorpayOrder,
   verifyRazorpayPayment,
@@ -229,6 +229,7 @@ function SubscriptionPageContent() {
             if (result.status !== 'success') {
               throw new Error(result.error || 'Payment verification failed');
             }
+            invalidateSubscriptionCache();
             await refreshSubscription();
             alert('Payment verified successfully! Your subscription is now active.');
           } catch (err) {

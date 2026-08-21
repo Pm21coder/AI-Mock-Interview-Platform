@@ -216,9 +216,22 @@ class SubscriptionService:
             raise ValueError(f'Invalid subscription tier: {tier}')
 
         start_date = utc_now()
-        # Free tier doesn't expire, paid tiers last 30 days
+        # Free tier doesn't expire, paid tiers last 30 days unless an unlimited
+        # master coupon explicitly grants permanent access.
         duration_days = 30 if tier != 'free' else 365 * 100
         end_date = start_date + timedelta(days=duration_days)
+
+        grant_unlimited = False
+        if coupon_code:
+            try:
+                coupon_info = self.get_coupon_info(coupon_code)
+                if coupon_info and coupon_info.get('grant_unlimited'):
+                    grant_tier = coupon_info.get('grant_tier')
+                    if not grant_tier or grant_tier == tier:
+                        grant_unlimited = True
+                        end_date = None
+            except Exception:
+                grant_unlimited = False
 
         update_data = {
             'subscription_tier': tier,
@@ -228,6 +241,8 @@ class SubscriptionService:
             'interviews_used_this_month': 0,
             'is_trial': is_trial,
         }
+        if grant_unlimited:
+            update_data['subscription_monthly_limit'] = None
 
         if razorpay_order_id:
             update_data['razorpay_order_id'] = razorpay_order_id
@@ -258,6 +273,7 @@ class SubscriptionService:
             logger.error(f'Error creating subscription for user {user_id}: {e}')
             raise
 
+        self.invalidate_cache(user_id)
         return self.get_user_subscription(user_id)
 
     def upgrade_subscription(self, user_id, new_tier, razorpay_order_id=None,
@@ -322,6 +338,7 @@ class SubscriptionService:
             logger.error(f'Error downgrading user {user_id}: {e}')
             raise
 
+        self.invalidate_cache(user_id)
         return self.get_user_subscription(user_id)
 
     def cancel_subscription(self, user_id):

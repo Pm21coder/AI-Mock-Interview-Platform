@@ -166,6 +166,33 @@ class TestSubscriptionService:
                 assert result['tier'] == 'basic'
                 mock_update.assert_called_once()
 
+    def test_create_subscription_master_code_is_permanent(self, subscription_service):
+        """Master coupons should grant unlimited, non-expiring access even when invoked directly."""
+        with patch('app.services.subscription_service.mongo.db.users.update_one') as mock_update, \
+             patch.object(subscription_service, 'get_coupon_info', return_value={
+                 'grant_unlimited': True,
+                 'grant_tier': 'pro',
+             }), \
+             patch.object(subscription_service, 'get_user_subscription') as mock_get:
+            mock_update.return_value = Mock(matched_count=1)
+            mock_get.return_value = {
+                'tier': 'pro',
+                'status': 'active',
+                'monthly_limit': 'unlimited',
+                'interviews_remaining': 'unlimited',
+                'interviews_used_this_month': 0,
+            }
+
+            result = subscription_service.create_subscription(
+                'user1', 'pro', coupon_code='MASTER-PRO-16BAEA3245C7D44A'
+            )
+
+            assert result['tier'] == 'pro'
+            assert result['monthly_limit'] == 'unlimited'
+            args = mock_update.call_args.args[1]['$set']
+            assert args['subscription_end_date'] is None
+            assert args['subscription_monthly_limit'] is None
+
     def test_upgrade_subscription(self, subscription_service):
         """Test upgrading subscription to higher tier."""
         with patch.object(subscription_service, 'get_user_subscription') as mock_get:
@@ -326,9 +353,56 @@ class TestSubscriptionRoutes:
         pass
 
     def test_verify_payment(self, client):
-        """Test payment verification endpoint."""
-        # Test would require valid payment data
-        pass
+        """Test payment verification endpoint returns a refreshed subscription."""
+        email = f"verify.payment+{int(datetime.utcnow().timestamp())}@example.com"
+        register = client.post('/api/auth/register', json={'email': email, 'password': 'TestPass1!'})
+        assert register.status_code in (200, 201)
+        token = register.get_json().get('token')
+        if not token:
+            login = client.post('/api/auth/login', json={'email': email, 'password': 'TestPass1!'})
+            token = login.get_json().get('token')
+        assert token
+        headers = {'Authorization': f'Bearer {token}'}
+
+        order_id = 'order_123'
+        user_id = None
+        from app.utils.auth import get_user_id_from_token as _get_user_id
+        user_id = _get_user_id(token)
+        from app.routes import subscription as subscription_routes
+
+        subscription_routes.fallback_razorpay_orders[order_id] = {
+            'order_id': order_id,
+            'user_id': str(user_id),
+            'tier': 'pro',
+            'amount': 1000,
+            'currency': 'INR',
+            'status': 'created',
+        }
+
+        with patch('app.routes.subscription.is_mongo_available', return_value=False), \
+             patch('app.routes.subscription.Config.RAZORPAY_KEY_SECRET', 'secret123'), \
+             patch('app.routes.subscription.audit_logger.log_payment_completed'):
+            import hashlib
+            import hmac
+            expected = hmac.new(
+                b'secret123',
+                b'order_123|pay_123',
+                hashlib.sha256,
+            ).hexdigest()
+            payload = {
+                'razorpay_order_id': order_id,
+                'razorpay_payment_id': 'pay_123',
+                'razorpay_signature': expected,
+            }
+
+            response = client.post('/api/subscription/verify-payment', json=payload, headers=headers)
+
+            assert response.status_code == 200
+            data = json.loads(response.data)
+            assert data['status'] == 'success'
+            assert data['tier'] == 'pro'
+            assert data['subscription']['tier'] == 'pro'
+            assert data['subscription']['monthly_limit'] == 'unlimited'
 
     def test_usage_stats_endpoint(self, client):
         """Test GET /api/subscription/usage-stats endpoint."""

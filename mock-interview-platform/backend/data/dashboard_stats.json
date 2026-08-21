@@ -80,11 +80,23 @@
   },
   "demo_c04d924b-d6ef-43f8-bac7-100573abddba": {
     "user_id": "demo_c04d924b-d6ef-43f8-bac7-100573abddba",
-    "interviews_completed": 2,
-    "average_score": 72,
+    "interviews_completed": 4,
+    "average_score": 60,
     "confidence_score": 75,
-    "total_responses": 10,
+    "total_responses": 20,
     "recent_interviews": [
+      {
+        "role": "Software Engineer",
+        "score": 37,
+        "date": "2026-08-21T05:18:42.621829",
+        "confidence": 75
+      },
+      {
+        "role": "Cyber Security Expert",
+        "score": 95,
+        "date": "2026-08-21T05:08:06.168930",
+        "confidence": 75
+      },
       {
         "role": "Cloud Engineer",
         "score": 78,
@@ -98,7 +110,7 @@
         "confidence": 75
       }
     ],
-    "updated_at": "2026-08-20 20:07:14.380762",
-    "history_synced_at": "2026-08-20 20:07:14.380762"
+    "updated_at": "2026-08-21 05:25:01.549799",
+    "history_synced_at": "2026-08-21 05:25:01.549799"
   }
 }

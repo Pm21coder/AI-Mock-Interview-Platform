@@ -267,12 +267,25 @@ export function useSubscription() {
       }
     }
 
+    function onSubscriptionUpdated() {
+      try {
+        const accountKey = email || window.localStorage.getItem('auth_email') || '__authenticated__';
+        swrCache.delete(accountKey);
+        window.localStorage.removeItem(STORAGE_KEY);
+        void fetchSubscription();
+      } catch (e) {
+        // ignore
+      }
+    }
+
     window.addEventListener('app:master-code-applied', onMasterCode);
+    window.addEventListener('app:subscription-updated', onSubscriptionUpdated);
     window.addEventListener('online', onOnline);
 
     return () => {
       window.clearTimeout(initialLoad);
       window.removeEventListener('app:master-code-applied', onMasterCode);
+      window.removeEventListener('app:subscription-updated', onSubscriptionUpdated);
       window.removeEventListener('online', onOnline);
     };
   }, [applySubscription, email, fetchSubscription, isAuthenticated]);
