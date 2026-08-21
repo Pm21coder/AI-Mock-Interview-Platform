@@ -748,6 +748,26 @@ export const getDashboardStats = async (options = { forceRefresh: false }) => {
     _cachedDashboardTs = Date.now();
     return response.data;
   } catch (error) {
+    if (isAuthExpiredError(error)) {
+      clearClientAuthState();
+      return {
+        fallback: true,
+        demo: true,
+        stats: {
+          interviews_completed: 18,
+          average_score: 82,
+          confidence_score: 88,
+        },
+        recent_interviews: [
+          { role: 'Software Engineer', score: 88, date: '2026-08-01', confidence: 90 },
+          { role: 'Product Manager', score: 79, date: '2026-07-29', confidence: 85 },
+          { role: 'Data Analyst', score: 91, date: '2026-07-24', confidence: 92 },
+          { role: 'UX Designer', score: 75, date: '2026-07-20', confidence: 80 },
+          { role: 'DevOps Engineer', score: 85, date: '2026-07-15', confidence: 88 },
+        ],
+      };
+    }
+
     // Build a plain object for logging; Axios Error properties are non-enumerable
     const serializedError = typeof error?.toJSON === 'function' ? error.toJSON() : null;
 
