@@ -39,6 +39,35 @@ function responseBodyForLog(error) {
   return body;
 }
 
+function isAuthExpiredError(error) {
+  const status = error?.response?.status ?? error?.status;
+  if (status !== 401) return false;
+
+  const data = error?.response?.data ?? error?.data ?? {};
+  const message = typeof data === 'string'
+    ? data
+    : (data?.error || data?.message || error?.message || '');
+
+  return /invalid or expired token|unauthorized|authentication required|not authenticated/i.test(String(message));
+}
+
+function clearClientAuthState() {
+  if (typeof window === 'undefined') return false;
+
+  const hadAuth = !!(window.localStorage.getItem('auth_token') || window.localStorage.getItem('auth_email'));
+  if (!hadAuth) return false;
+
+  window.localStorage.removeItem('auth_token');
+  window.localStorage.removeItem('auth_email');
+  invalidateAllSubscriptionCaches();
+  try {
+    window.dispatchEvent(new Event('auth-change'));
+  } catch (e) {
+    // ignore unsupported event creation
+  }
+  return true;
+}
+
 // Simple throttle to avoid spamming the console with repeated identical
 // API error dumps during transient backend issues. Keyed by endpoint + status.
 const API_LOG_THROTTLE_TTL = 30_000; // 30 seconds
@@ -67,6 +96,18 @@ function logApiError(endpoint, error) {
     }
   } catch (e) {
     // ignore cancellation detection failures and continue to normal logging
+  }
+
+  if (isAuthExpiredError(error)) {
+    // Expired/invalid auth tokens are a normal lifecycle event for protected
+    // requests; clear the client auth state and avoid noisy error logging.
+    try {
+      clearClientAuthState();
+      console.debug(`Auth expired while calling ${endpoint}; cleared local auth state.`);
+    } catch (e) {
+      // ignore auth clearing failures
+    }
+    return;
   }
 
   // Throttle repeated logs for the same endpoint/status to reduce noise.
@@ -396,21 +437,26 @@ api.interceptors.response.use(
       originalRequest?.url?.startsWith('/api/interview/') ||
       originalRequest?.url?.startsWith('/api/resume/');
 
-    if (
-      error.response?.status === 401 &&
-      isPracticeRequest &&
-      !originalRequest._guestFallback &&
-      typeof window !== 'undefined'
-    ) {
-      originalRequest._guestFallback = true;
-      window.localStorage.removeItem('auth_token');
-      window.localStorage.removeItem('auth_email');
-      delete originalRequest.headers.Authorization;
-      return api(originalRequest);
+  if (error.response?.status === 401 && typeof window !== 'undefined') {
+    const hadStoredAuth = !!(window.localStorage.getItem('auth_token') || window.localStorage.getItem('auth_email'));
+    if (hadStoredAuth) {
+      clearClientAuthState();
     }
 
-    return Promise.reject(error);
-  },
+    if (
+      isPracticeRequest &&
+      !originalRequest._guestFallback
+    ) {
+      originalRequest._guestFallback = true;
+      if (originalRequest.headers) {
+        delete originalRequest.headers.Authorization;
+      }
+      return api(originalRequest);
+    }
+  }
+
+  return Promise.reject(error);
+},
 );
 
 export const register = async (credentials) => {
