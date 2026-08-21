@@ -80,11 +80,17 @@
   },
   "demo_c04d924b-d6ef-43f8-bac7-100573abddba": {
     "user_id": "demo_c04d924b-d6ef-43f8-bac7-100573abddba",
-    "interviews_completed": 4,
-    "average_score": 60,
+    "interviews_completed": 5,
+    "average_score": 62,
     "confidence_score": 75,
-    "total_responses": 20,
+    "total_responses": 25,
     "recent_interviews": [
+      {
+        "role": "Lawyer",
+        "score": 65,
+        "date": "2026-08-21T10:45:54.630418",
+        "confidence": 75
+      },
       {
         "role": "Software Engineer",
         "score": 37,
@@ -110,7 +116,7 @@
         "confidence": 75
       }
     ],
-    "updated_at": "2026-08-21 05:25:01.549799",
-    "history_synced_at": "2026-08-21 05:25:01.549799"
+    "updated_at": "2026-08-21 10:54:20.525951",
+    "history_synced_at": "2026-08-21 10:54:20.525951"
   }
 }
