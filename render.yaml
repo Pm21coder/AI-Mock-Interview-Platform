@@ -1,0 +1,33 @@
+# render.yaml - Template Render service manifest for the backend
+# NOTE: This is a sample template. Do NOT put real secrets in this file.
+# After creating the service in Render, add secrets and environment variables via the Render Dashboard
+# (Services → <your-service> → Environment → Environment variables) or via Render's web UI/CLI.
+
+services:
+  - type: web
+    name: ai-mock-backend
+    # Use the appropriate runtime (python)
+    env: python
+    # Instance plan (starter / free / standard). Change as needed.
+    plan: starter
+    # Region (optional). Example: oregon, ireland, frankfurt
+    # region: oregon
+
+    # Build command - install dependencies
+    buildCommand: pip install -r requirements.txt
+
+    # Start command - for Flask-SocketIO use an async worker (eventlet) in production.
+    # Options:
+    # - Use gunicorn with eventlet: gunicorn -k eventlet -w 1 run:app --bind 0.0.0.0:$PORT
+    #   (run.py exposes the app via create_app() and socketio.run in development; run:app works with Gunicorn)
+    # - Alternatively run the bundled entrypoint directly: python run.py (suitable for Render but less performant)
+    # Recommended (production):
+    startCommand: gunicorn -k eventlet -w 1 run:app --bind 0.0.0.0:$PORT
+
+    # Health check (optional) - endpoint to verify the service is healthy after deployment
+    # healthCheckPath: /healthz
+
+# Reminder: Add the following environment variables in Render Dashboard (do not store secrets here):
+# DATABASE_URL, JWT_SECRET, FLASK_SECRET_KEY (or SECRET_KEY), RAZORPAY_KEY_SECRET, RAZORPAY_WEBHOOK_SECRET,
+# REDIS_URL, RATELIMIT_STORAGE_URI, SMTP_* (SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, EMAIL_FROM), SENTRY_DSN
+# For the frontend, set NEXT_PUBLIC_API_BASE_URL to your Render service public URL (e.g. https://ai-mock-backend.onrender.com)
