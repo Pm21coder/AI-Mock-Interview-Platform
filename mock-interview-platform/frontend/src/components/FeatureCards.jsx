@@ -78,9 +78,8 @@ export default function FeatureCards() {
     <section className="py-8 sm:py-10 lg:py-16">
       <div className="mb-6 text-center sm:mb-8">
         <p className="text-sm font-semibold uppercase tracking-[0.18em] text-blue-600 dark:text-blue-400">Why people choose us</p>
-        <h2 className="mt-3 text-3xl font-black text-slate-900 sm:text-4xl dark:text-slate-100">Practice smarter, not harder.</h2>
       </div>
-
+ 
       <div className="grid gap-6 sm:grid-cols-1 md:grid-cols-2 lg:grid-cols-3">
         {FEATURES.map((f) => (
           <article key={f.id} className="reveal-card feature-card group rounded-2xl border border-slate-200 card-bg p-4 shadow-sm dark:border-slate-700">
@@ -91,11 +90,11 @@ export default function FeatureCards() {
                 className="block w-full rounded-lg overflow-hidden focus:outline-none focus:ring-2 focus:ring-blue-500"
                 aria-label={`Open ${f.title} image`}
               >
-                <div className="w-full block overflow-hidden rounded-lg" style={{ width: '100%', aspectRatio: '4 / 3' }}>
+                <div className="w-full block overflow-hidden rounded-lg h-48 sm:h-64 md:h-72 lg:h-80" style={{ width: '100%', aspectRatio: '4 / 3' }}>
                   <picture className="w-full h-full block">
                     <source srcSet={makeSrcSet(f.base, 'avif')} type="image/avif" sizes="(max-width: 640px) 480px, (max-width: 1024px) 768px, 1024px" />
                     <source srcSet={makeSrcSet(f.base, 'webp')} type="image/webp" sizes="(max-width: 640px) 480px, (max-width: 1024px) 768px, 1024px" />
-                    <img src={`${f.base}-1024.webp`} alt={f.title} className="w-full h-full object-contain lg:object-cover object-center" />
+                    <img src={`${f.base}-1024.webp`} alt={f.title} className="w-full h-full object-cover object-center" />
                   </picture>
                 </div>
               </button>
