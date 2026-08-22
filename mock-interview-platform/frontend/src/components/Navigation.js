@@ -8,7 +8,7 @@ import { disconnectSocket } from '../utils/socket';
 
 const navigationLinks = [
   { href: '/dashboard', label: 'Dashboard' },
-  { href: '/interview/setup', label: 'New Interview' },
+  { href: '/interview/setup', label: 'New Interview', requiresAuth: true },
   { href: '/resume', label: 'Resume Analyzer' },
   { href: '/subscription', label: 'Pricing' },
   { href: '/contact', label: 'Contact' },
@@ -24,6 +24,15 @@ export default function Navigation() {
   const router = useRouter();
   const { email, logout } = useAuth();
   const [isMenuOpen, setIsMenuOpen] = useState(false);
+
+  const resolveInterviewRoute = useCallback(() => {
+    if (!email) {
+      router.push('/auth?next=/interview/setup');
+      return;
+    }
+
+    router.push('/interview/setup');
+  }, [email, router]);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [theme, setTheme] = useState('light');
 
@@ -95,9 +104,20 @@ export default function Navigation() {
           <div className="hidden items-center gap-1 md:flex lg:gap-2">
             {navigationLinks.map((link) => (
               link.href !== '/contact' && (
-                <Link key={link.href} href={link.href} className={linkClass}>
-                  {link.label}
-                </Link>
+                link.requiresAuth ? (
+                  <button
+                    key={link.href}
+                    type="button"
+                    className={linkClass}
+                    onClick={resolveInterviewRoute}
+                  >
+                    {link.label}
+                  </button>
+                ) : (
+                  <Link key={link.href} href={link.href} className={linkClass}>
+                    {link.label}
+                  </Link>
+                )
               )
             ))}
             <Link href="/contact" className={buttonBase}>
@@ -226,14 +246,28 @@ export default function Navigation() {
           <div className={isDarkTheme ? 'border-t border-white/10 md:hidden' : 'border-t border-gray-200 md:hidden'}>
             <div className="space-y-1 px-2 py-3">
               {navigationLinks.map((link) => (
-                <Link
-                  key={link.href}
-                  href={link.href}
-                  className={isDarkTheme ? 'block rounded-md px-3 py-2 text-base font-medium text-slate-200 hover:bg-white/5 hover:text-white' : 'block rounded-md px-3 py-2 text-base font-medium text-gray-600 hover:bg-gray-50 hover:text-gray-900'}
-                  onClick={closeMenu}
-                >
-                  {link.label}
-                </Link>
+                link.requiresAuth ? (
+                  <button
+                    key={link.href}
+                    type="button"
+                    className={isDarkTheme ? 'block w-full rounded-md px-3 py-2 text-left text-base font-medium text-slate-200 hover:bg-white/5 hover:text-white' : 'block w-full rounded-md px-3 py-2 text-left text-base font-medium text-gray-600 hover:bg-gray-50 hover:text-gray-900'}
+                    onClick={() => {
+                      closeMenu();
+                      resolveInterviewRoute();
+                    }}
+                  >
+                    {link.label}
+                  </button>
+                ) : (
+                  <Link
+                    key={link.href}
+                    href={link.href}
+                    className={isDarkTheme ? 'block rounded-md px-3 py-2 text-base font-medium text-slate-200 hover:bg-white/5 hover:text-white' : 'block rounded-md px-3 py-2 text-base font-medium text-gray-600 hover:bg-gray-50 hover:text-gray-900'}
+                    onClick={closeMenu}
+                  >
+                    {link.label}
+                  </Link>
+                )
               ))}
               <Link
                 href="/contact"

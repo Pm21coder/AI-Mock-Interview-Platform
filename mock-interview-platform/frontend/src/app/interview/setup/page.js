@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import Navigation from '../../../components/Navigation';
 import toast from 'react-hot-toast';
 import { getQuestionCategories } from '../../../utils/api';
+import { useAuth } from '../../../hooks/useAuth';
 import { useSubscription } from '../../../hooks/useSubscription';
 import { useInterviewSync } from '../../../hooks/useInterviewSync';
 import { canStartInterview } from '../../../utils/interviewQuota.mjs';
@@ -37,6 +38,7 @@ function getAllowedCategoriesFromStorage() {
 
 export default function InterviewSetup() {
   const router = useRouter();
+  const { isAuthenticated } = useAuth();
   const { subscription, loading: subscriptionLoading, refetch } = useSubscription();
   const [availableCategories, setAvailableCategories] = useState(['technical', 'behavioral']);
   const [loadingCategories, setLoadingCategories] = useState(true);
@@ -57,6 +59,17 @@ export default function InterviewSetup() {
   useInterviewSync(refetch);
 
   useEffect(() => {
+    if (!isAuthenticated) {
+      router.replace('/auth?next=/interview/setup');
+      return;
+    }
+  }, [isAuthenticated, router]);
+
+  useEffect(() => {
+    if (!isAuthenticated) {
+      return;
+    }
+
     const fetchCategories = async () => {
       try {
         const response = await getQuestionCategories();
@@ -82,7 +95,7 @@ export default function InterviewSetup() {
     };
 
     fetchCategories();
-  }, [subscription]); // Re-fetch when subscription changes
+  }, [isAuthenticated, subscription]); // Re-fetch when auth/subscription changes
 
 
   const handleSubmit = (e) => {

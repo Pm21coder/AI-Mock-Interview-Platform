@@ -3,8 +3,10 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
+import { useRouter } from 'next/navigation';
 import Navigation from '../components/Navigation';
 import FeatureCards from '../components/FeatureCards';
+import { useAuth } from '../hooks/useAuth';
 
 const stats = [
   { label: 'Practice sessions', value: '7,000+' },
@@ -13,7 +15,18 @@ const stats = [
 ];
 
 export default function Home() {
+  const router = useRouter();
+  const { isAuthenticated } = useAuth();
   const [theme, setTheme] = useState('light');
+
+  const handleStartInterview = () => {
+    if (!isAuthenticated) {
+      router.push('/auth?next=/interview/setup');
+      return;
+    }
+
+    router.push('/interview/setup');
+  };
 
   const scrollToHowItWorks = (event) => {
     const target = document.getElementById('how-it-works');
@@ -115,13 +128,14 @@ export default function Home() {
               </p>
 
               <div className="mt-7 flex flex-col items-center gap-3 sm:flex-row lg:justify-start">
-                <Link
-                  href="/interview/setup"
+                <button
+                  type="button"
+                  onClick={handleStartInterview}
                   className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-blue-600 via-indigo-600 to-violet-600 px-6 py-3.5 text-base font-semibold text-white shadow-lg shadow-blue-500/25 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-xl hover:shadow-blue-500/30 active:scale-[0.98] sm:w-auto"
                 >
                   Start Practice Interview
                   <span aria-hidden="true">→</span>
-                </Link>
+                </button>
                 <Link
                   href="#how-it-works"
                   onClick={scrollToHowItWorks}

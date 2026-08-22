@@ -9,6 +9,7 @@ import VideoRecorder from '../../../components/VideoRecorder';
 import FeedbackDisplay from '../../../components/FeedbackDisplay';
 import LimitErrorModal from '../../../components/LimitErrorModal';
 import { getQuestions, submitAnswer, getFeedback } from '../../../utils/api';
+import { useAuth } from '../../../hooks/useAuth';
 import { invalidateSubscriptionCache } from '../../../hooks/useSubscription';
 
 function getSpeechErrorMessage(error) {
@@ -108,6 +109,7 @@ function SessionLoading() {
 
 function InterviewSessionContent() {
   const router = useRouter();
+  const { isAuthenticated } = useAuth();
   const searchParams = useSearchParams();
   const paramsKey = searchParams ? searchParams.toString() : null;
   const jobRole = searchParams?.get('job_role') || 'Software Engineer';
@@ -115,6 +117,12 @@ function InterviewSessionContent() {
   const difficulty = searchParams?.get('difficulty') || 'medium';
   const rawNum = Number(searchParams?.get('num_questions') || 5);
   const numQuestions = Number.isFinite(rawNum) ? Math.min(Math.max(1, Math.floor(rawNum)), 10) : 5;
+  useEffect(() => {
+    if (!isAuthenticated) {
+      router.replace('/auth?next=/interview/setup');
+    }
+  }, [isAuthenticated, router]);
+
   const [questions, setQuestions] = useState([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isProcessing, setIsProcessing] = useState(false);
