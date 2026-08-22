@@ -316,11 +316,11 @@ function FeatureCard({ iconSrc, title, description }) {
             {/* Large image at top so embedded text is readable. Click to open full-size modal. */}
             <div className="mb-4">
               <button type="button" onClick={() => setOpen(true)} className="block w-full rounded-lg overflow-hidden focus:outline-none">
-                <div className="relative w-full rounded-lg overflow-hidden bg-slate-900/40">
-                  <picture className="w-full aspect-square block overflow-hidden rounded-lg">
+                <div className="relative w-full rounded-lg overflow-hidden">
+                  <picture className="w-full block overflow-hidden rounded-lg" style={{ aspectRatio: '1 / 1' }}>
                     <source srcSet={avifSrcSet} type="image/avif" sizes="(max-width: 640px) 480px, (max-width: 1024px) 768px, 1024px" />
                     <source srcSet={webpSrcSet} type="image/webp" sizes="(max-width: 640px) 480px, (max-width: 1024px) 768px, 1024px" />
-                                      <img src={previewSrc} alt={title} className="w-full h-full object-cover object-center" />
+                                      <img src={previewSrc} alt={title} className="w-full h-full object-contain object-center" />
                   </picture>
                 </div>
               </button>
