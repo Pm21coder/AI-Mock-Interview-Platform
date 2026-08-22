@@ -316,11 +316,11 @@ function FeatureCard({ iconSrc, title, description }) {
             {/* Large image at top so embedded text is readable. Click to open full-size modal. */}
             <div className="mb-4">
               <button type="button" onClick={() => setOpen(true)} className="block w-full rounded-lg overflow-hidden focus:outline-none">
-                <div className="relative w-full rounded-lg overflow-hidden bg-slate-900/40 flex items-center justify-center">
-                  <picture className="w-full">
+                <div className="relative w-full rounded-lg overflow-hidden bg-slate-900/40">
+                  <picture className="w-full h-64 md:h-80 lg:h-96 block">
                     <source srcSet={avifSrcSet} type="image/avif" sizes="(max-width: 640px) 480px, (max-width: 1024px) 768px, 1024px" />
                     <source srcSet={webpSrcSet} type="image/webp" sizes="(max-width: 640px) 480px, (max-width: 1024px) 768px, 1024px" />
-                    <img src={previewSrc} alt={title} className="max-h-64 md:max-h-80 lg:max-h-96 w-auto object-contain rounded-lg" />
+                    <img src={previewSrc} alt={title} className="w-full h-full object-cover object-center rounded-lg" />
                   </picture>
                 </div>
               </button>
@@ -341,7 +341,9 @@ function FeatureCard({ iconSrc, title, description }) {
                   <picture>
                     <source srcSet={base + '-1400.avif'} type="image/avif" />
                     <source srcSet={base + '-1400.webp'} type="image/webp" />
-                    <img src={base + '-1400.png'} alt={title} className="max-h-[85vh] w-auto max-w-full object-contain rounded-lg" />
+                    <div className="max-w-[95vw] max-h-[85vh]">
+                      <img src={base + '-1400.png'} alt={title} className="w-full h-full object-cover object-center rounded-lg" />
+                    </div>
                   </picture>
                 </div>
               </div>
