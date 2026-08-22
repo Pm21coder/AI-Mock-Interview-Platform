@@ -93,6 +93,11 @@ def generate_questions():
 
     user_id = current_user_id()
     subscription_user_id = current_subscription_user_id()
+    # Require authentication for starting interviews
+    if str(user_id) == 'guest':
+        # For new users, direct them to the frontend signup/create-account page.
+        signup_url = Config.FRONTEND_URL.rstrip('/') + '/signup'
+        return jsonify({'error': 'Authentication required to start an interview', 'signup_url': signup_url}), 401
     can_proceed, limit_error = subscription_service.check_interview_limit(
         subscription_user_id,
     )
