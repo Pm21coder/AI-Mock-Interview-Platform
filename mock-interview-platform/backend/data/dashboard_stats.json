@@ -80,11 +80,17 @@
   },
   "demo_c04d924b-d6ef-43f8-bac7-100573abddba": {
     "user_id": "demo_c04d924b-d6ef-43f8-bac7-100573abddba",
-    "interviews_completed": 5,
+    "interviews_completed": 6,
     "average_score": 62,
     "confidence_score": 75,
-    "total_responses": 25,
+    "total_responses": 30,
     "recent_interviews": [
+      {
+        "role": "Advocate",
+        "score": 63,
+        "date": "2026-08-22T16:56:29.093624",
+        "confidence": 75
+      },
       {
         "role": "Lawyer",
         "score": 65,
@@ -116,7 +122,7 @@
         "confidence": 75
       }
     ],
-    "updated_at": "2026-08-21 10:54:20.525951",
-    "history_synced_at": "2026-08-21 10:54:20.525951"
+    "updated_at": "2026-08-22 17:03:38.457158",
+    "history_synced_at": "2026-08-22 17:03:38.457158"
   }
 }
