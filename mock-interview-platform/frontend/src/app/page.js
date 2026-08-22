@@ -299,15 +299,16 @@ export default function Home() {
 function FeatureCard({ iconSrc, title, description }) {
   return (
     <div className="reveal-card feature-card group rounded-[1.75rem] border border-slate-200 card-bg p-5 shadow-soft sm:p-6 dark:border-slate-700">
-      <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-blue-500 to-violet-500 text-3xl shadow-lg shadow-blue-500/20 transition-transform duration-200 group-hover:scale-105 overflow-hidden">
+      <div className="mb-4 flex h-20 w-20 items-center justify-center rounded-2xl bg-gradient-to-br from-blue-500 to-violet-500 text-3xl shadow-lg shadow-blue-500/20 transition-transform duration-200 group-hover:scale-105 overflow-hidden">
         <Image
           src={iconSrc}
           alt={title}
-          width={64}
-          height={64}
+                width={120}
+                height={120}
           className="h-full w-full rounded-lg object-cover"
-        />
-      </div>
+                priority={false}
+              />
+            </div>
       <h3 className="mb-2 text-xl font-bold card-title">{title}</h3>
       <p className="text-sm leading-6 card-text sm:text-base">{description}</p>
     </div>
