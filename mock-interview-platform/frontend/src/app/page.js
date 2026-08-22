@@ -298,7 +298,11 @@ export default function Home() {
 
 function FeatureCard({ iconSrc, title, description }) {
   const [open, setOpen] = useState(false);
-  const largeSrc = iconSrc.replace(/\.png$/, '-1400.png');
+  // derive optimized formats
+  const webpSrc = iconSrc.replace(/\.(jpe?g|jfif|png)$/i, '.webp');
+  const avifSrc = iconSrc.replace(/\.(jpe?g|jfif|png)$/i, '.avif');
+  const largeSrc = iconSrc.replace(/\.(jpe?g|jfif|png)$/i, '-1400.png');
+  const previewSrc = webpSrc; // prefer webp for preview
 
   return (
     <div className="reveal-card feature-card group rounded-[1.75rem] border border-slate-200 card-bg p-5 shadow-soft sm:p-6 dark:border-slate-700">
@@ -306,7 +310,7 @@ function FeatureCard({ iconSrc, title, description }) {
             <div className="mb-4">
               <button type="button" onClick={() => setOpen(true)} className="block w-full rounded-lg overflow-hidden focus:outline-none">
                 <Image
-                  src={iconSrc}
+                  src={previewSrc}
                   alt={title}
                   width={800}
                   height={800}
@@ -327,13 +331,11 @@ function FeatureCard({ iconSrc, title, description }) {
                   >
                     Close
                   </button>
-                  <Image
-                    src={largeSrc}
-                    alt={title}
-                    width={1400}
-                    height={1400}
-                    className="max-h-[85vh] w-auto max-w-full object-contain rounded-lg"
-                  />
+                  <picture>
+                    <source srcSet={avifSrc} type="image/avif" />
+                    <source srcSet={webpSrc} type="image/webp" />
+                    <img src={largeSrc} alt={title} className="max-h-[85vh] w-auto max-w-full object-contain rounded-lg" />
+                  </picture>
                 </div>
               </div>
             )}
