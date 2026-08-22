@@ -214,17 +214,17 @@ export default function Home() {
 
           <div className="grid gap-5 md:grid-cols-3">
             <FeatureCard
-              iconSrc="/images/feature-orig-1.png"
+              iconSrc="/images/feature-user-1.jfif"
               title="Smart question generation"
               description="Receive role-specific prompts tuned to your experience, target company, and interview level."
             />
             <FeatureCard
-              iconSrc="/images/feature-orig-2.png"
+              iconSrc="/images/feature-user-2.jfif"
               title="Computer vision insights"
               description="Analyze eye contact, posture, energy, and speaking rhythm for a more realistic practice session."
             />
             <FeatureCard
-              iconSrc="/images/feature-orig-3.png"
+              iconSrc="/images/feature-user-3.jfif"
               title="AI-powered coaching"
               description="Turn your responses into actionable feedback with clearer suggestions and stronger answers."
             />
