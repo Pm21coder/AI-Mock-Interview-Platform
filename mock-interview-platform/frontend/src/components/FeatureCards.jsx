@@ -12,19 +12,19 @@ const FEATURES = [
     id: 'smart-questions',
     title: 'Smart question generation',
     description: 'Receive role-specific prompts tuned to your experience, target company, and interview level.',
-    base: '/images/feature-user-1',
+    src: '/images/feature-user-1-original.jfif',
   },
   {
     id: 'vision-insights',
     title: 'Computer vision insights',
     description: 'Analyze eye contact, posture, energy, and speaking rhythm for a more realistic practice session.',
-    base: '/images/feature-user-2',
+    src: '/images/feature-user-2-original.jfif',
   },
   {
     id: 'ai-coaching',
     title: 'AI-powered coaching',
     description: 'Turn your responses into actionable feedback with clearer suggestions and stronger answers.',
-    base: '/images/feature-user-3',
+    src: '/images/feature-user-3-original.jfif',
   },
 ]
 
@@ -86,16 +86,20 @@ export default function FeatureCards() {
             <div className="mb-4">
               <button
                 type="button"
-                onClick={() => openImage(f.base)}
+                onClick={() => openImage(f.src || f.base)}
                 className="block w-full rounded-lg overflow-hidden focus:outline-none focus:ring-2 focus:ring-blue-500"
                 aria-label={`Open ${f.title} image`}
               >
                 <div className="w-full block overflow-hidden rounded-lg h-48 sm:h-64 md:h-72 lg:h-80" style={{ width: '100%', aspectRatio: '4 / 3' }}>
-                  <picture className="w-full h-full block">
-                    <source srcSet={makeSrcSet(f.base, 'avif')} type="image/avif" sizes="(max-width: 640px) 480px, (max-width: 1024px) 768px, 1024px" />
-                    <source srcSet={makeSrcSet(f.base, 'webp')} type="image/webp" sizes="(max-width: 640px) 480px, (max-width: 1024px) 768px, 1024px" />
-                    <img src={`${f.base}-1024.webp`} alt={f.title} className="w-full h-full object-cover object-center" />
-                  </picture>
+                  {f.src ? (
+                    <img src={f.src} alt={f.title} className="w-full h-full object-contain object-center" />
+                  ) : (
+                    <picture className="w-full h-full block">
+                      <source srcSet={makeSrcSet(f.base, 'avif')} type="image/avif" sizes="(max-width: 640px) 480px, (max-width: 1024px) 768px, 1024px" />
+                      <source srcSet={makeSrcSet(f.base, 'webp')} type="image/webp" sizes="(max-width: 640px) 480px, (max-width: 1024px) 768px, 1024px" />
+                      <img src={`${f.base}-1024.webp`} alt={f.title} className="w-full h-full object-cover object-center" />
+                    </picture>
+                  )}
                 </div>
               </button>
             </div>
@@ -111,11 +115,15 @@ export default function FeatureCards() {
           <div className="max-w-[95vw] max-h-[95vh] p-4" onClick={(e) => e.stopPropagation()}>
             <div ref={modalRef} tabIndex={-1} className="outline-none">
               <button onClick={() => setOpen(false)} className="mb-2 rounded bg-white/10 px-3 py-1 text-sm text-white">Close</button>
-              <picture>
-                <source srcSet={`${openBase}-1400.avif`} type="image/avif" />
-                <source srcSet={`${openBase}-1400.webp`} type="image/webp" />
-                <img src={`${openBase}-1400.png`} alt="Full panel" className="max-h-[85vh] w-auto max-w-full object-contain rounded-lg shadow-lg" />
-              </picture>
+              {openBase && (openBase.endsWith('.jfif') || openBase.endsWith('.jpg') || openBase.endsWith('.jpeg') || openBase.endsWith('.png')) ? (
+                <img src={openBase} alt="Full panel" className="max-h-[85vh] w-auto max-w-full object-contain rounded-lg shadow-lg" />
+              ) : (
+                <picture>
+                  <source srcSet={`${openBase}-1400.avif`} type="image/avif" />
+                  <source srcSet={`${openBase}-1400.webp`} type="image/webp" />
+                  <img src={`${openBase}-1400.png`} alt="Full panel" className="max-h-[85vh] w-auto max-w-full object-contain rounded-lg shadow-lg" />
+                </picture>
+              )}
             </div>
           </div>
         </div>
