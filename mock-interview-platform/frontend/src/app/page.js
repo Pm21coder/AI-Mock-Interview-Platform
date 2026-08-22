@@ -298,24 +298,29 @@ export default function Home() {
 
 function FeatureCard({ iconSrc, title, description }) {
   const [open, setOpen] = useState(false);
-  // derive optimized formats
-  const webpSrc = iconSrc.replace(/\.(jpe?g|jfif|png)$/i, '.webp');
-  const avifSrc = iconSrc.replace(/\.(jpe?g|jfif|png)$/i, '.avif');
-  const largeSrc = iconSrc.replace(/\.(jpe?g|jfif|png)$/i, '-1400.png');
-  const previewSrc = webpSrc; // prefer webp for preview
+  // derive optimized formats and responsive srcsets
+  const base = iconSrc.replace(/\.(jpe?g|jfif|png)$/i, '');
+  const webpSrc = base + '.webp';
+  const avifSrc = base + '.avif';
+  const largeSrc = base + '-1400.png';
+  const sizes = [480,768,1024,1400];
+  const makeSrcSet = (ext) => sizes
+    .map((w) => `${base}-${w}.${ext} ${w}w`)
+    .join(', ');
+  const webpSrcSet = makeSrcSet('webp');
+  const avifSrcSet = makeSrcSet('avif');
+  const previewSrc = base + '-1024.webp';
 
   return (
     <div className="reveal-card feature-card group rounded-[1.75rem] border border-slate-200 card-bg p-5 shadow-soft sm:p-6 dark:border-slate-700">
             {/* Large image at top so embedded text is readable. Click to open full-size modal. */}
             <div className="mb-4">
               <button type="button" onClick={() => setOpen(true)} className="block w-full rounded-lg overflow-hidden focus:outline-none">
-                <Image
-                  src={previewSrc}
-                  alt={title}
-                  width={800}
-                  height={800}
-                  className="w-full h-64 md:h-80 lg:h-96 rounded-lg object-cover"
-                />
+                <picture>
+                  <source srcSet={avifSrcSet} type="image/avif" />
+                  <source srcSet={webpSrcSet} type="image/webp" />
+                  <img src={previewSrc} alt={title} className="w-full h-64 md:h-80 lg:h-96 rounded-lg object-cover" />
+                </picture>
               </button>
             </div>
 
