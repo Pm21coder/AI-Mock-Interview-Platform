@@ -298,6 +298,7 @@ export default function Home() {
 
 function FeatureCard({ iconSrc, title, description }) {
   const [open, setOpen] = useState(false);
+  const largeSrc = iconSrc.replace(/\.png$/, '-1400.png');
 
   return (
     <div className="reveal-card feature-card group rounded-[1.75rem] border border-slate-200 card-bg p-5 shadow-soft sm:p-6 dark:border-slate-700">
@@ -327,7 +328,7 @@ function FeatureCard({ iconSrc, title, description }) {
                     Close
                   </button>
                   <Image
-                    src={iconSrc}
+                    src={largeSrc}
                     alt={title}
                     width={1400}
                     height={1400}
