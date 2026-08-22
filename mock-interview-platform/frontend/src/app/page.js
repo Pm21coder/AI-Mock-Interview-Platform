@@ -224,7 +224,7 @@ export default function Home() {
               description="Analyze eye contact, posture, energy, and speaking rhythm for a more realistic practice session."
             />
             <FeatureCard
-              iconSrc="https://images.unsplash.com/photo-1587614382346-4ec1b7b36b28?auto=format&fit=crop&w=600&q=80"
+              iconSrc="https://images.unsplash.com/photo-1522071820081-009f0129c71c?auto=format&fit=crop&w=600&q=80"
               title="AI-powered coaching"
               description="Turn your responses into actionable feedback with clearer suggestions and stronger answers."
             />
