@@ -297,20 +297,45 @@ export default function Home() {
 }
 
 function FeatureCard({ iconSrc, title, description }) {
+  const [open, setOpen] = useState(false);
+
   return (
     <div className="reveal-card feature-card group rounded-[1.75rem] border border-slate-200 card-bg p-5 shadow-soft sm:p-6 dark:border-slate-700">
-      <div className="mb-4 flex h-20 w-20 items-center justify-center rounded-2xl bg-gradient-to-br from-blue-500 to-violet-500 text-3xl shadow-lg shadow-blue-500/20 transition-transform duration-200 group-hover:scale-105 overflow-hidden">
-        <Image
-          src={iconSrc}
-          alt={title}
-                width={120}
-                height={120}
-          className="h-full w-full rounded-lg object-cover"
-                priority={false}
-              />
+            {/* Large image at top so embedded text is readable. Click to open full-size modal. */}
+            <div className="mb-4">
+              <button type="button" onClick={() => setOpen(true)} className="block w-full rounded-lg overflow-hidden focus:outline-none">
+                <Image
+                  src={iconSrc}
+                  alt={title}
+                  width={800}
+                  height={800}
+                  className="w-full h-64 md:h-80 lg:h-96 rounded-lg object-cover"
+                />
+              </button>
             </div>
-      <h3 className="mb-2 text-xl font-bold card-title">{title}</h3>
-      <p className="text-sm leading-6 card-text sm:text-base">{description}</p>
+
+            <h3 className="mb-2 text-xl font-bold card-title">{title}</h3>
+            <p className="text-sm leading-6 card-text sm:text-base">{description}</p>
+
+            {open && (
+              <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70" role="dialog" aria-modal="true" onClick={() => setOpen(false)}>
+                <div className="max-w-[95vw] max-h-[95vh] p-4" onClick={(e) => e.stopPropagation()}>
+                  <button
+                    onClick={() => setOpen(false)}
+                    className="mb-2 rounded bg-white/10 px-3 py-1 text-sm text-white"
+                  >
+                    Close
+                  </button>
+                  <Image
+                    src={iconSrc}
+                    alt={title}
+                    width={1400}
+                    height={1400}
+                    className="max-h-[85vh] w-auto max-w-full object-contain rounded-lg"
+                  />
+                </div>
+              </div>
+            )}
     </div>
   );
 }
