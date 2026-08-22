@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
 import Navigation from '../components/Navigation';
+import FeatureCards from '../components/FeatureCards';
 
 const stats = [
   { label: 'Practice sessions', value: '7,000+' },
@@ -212,22 +213,8 @@ export default function Home() {
             <h2 className="mt-3 text-3xl font-black text-slate-900 sm:text-4xl dark:text-slate-100">Practice smarter, not harder.</h2>
           </div>
 
-          <div className="grid gap-5 md:grid-cols-3">
-            <FeatureCard
-              iconSrc="/images/feature-user-1.jfif"
-              title="Smart question generation"
-              description="Receive role-specific prompts tuned to your experience, target company, and interview level."
-            />
-            <FeatureCard
-              iconSrc="/images/feature-user-2.jfif"
-              title="Computer vision insights"
-              description="Analyze eye contact, posture, energy, and speaking rhythm for a more realistic practice session."
-            />
-            <FeatureCard
-              iconSrc="/images/feature-user-3.jfif"
-              title="AI-powered coaching"
-              description="Turn your responses into actionable feedback with clearer suggestions and stronger answers."
-            />
+          <div>
+            <FeatureCards />
           </div>
         </section>
 
