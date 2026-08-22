@@ -214,17 +214,17 @@ export default function Home() {
 
           <div className="grid gap-5 md:grid-cols-3">
             <FeatureCard
-              icon="🎯"
+              iconSrc="https://images.unsplash.com/photo-1522202176988-66273c2fd55f?auto=format&fit=crop&w=600&q=80"
               title="Smart question generation"
               description="Receive role-specific prompts tuned to your experience, target company, and interview level."
             />
             <FeatureCard
-              icon="👁️"
+              iconSrc="https://images.unsplash.com/photo-1529778873920-4da4926a72c2?auto=format&fit=crop&w=600&q=80"
               title="Computer vision insights"
               description="Analyze eye contact, posture, energy, and speaking rhythm for a more realistic practice session."
             />
             <FeatureCard
-              icon="🤖"
+              iconSrc="https://images.unsplash.com/photo-1587614382346-4ec1b7b36b28?auto=format&fit=crop&w=600&q=80"
               title="AI-powered coaching"
               description="Turn your responses into actionable feedback with clearer suggestions and stronger answers."
             />
@@ -296,11 +296,17 @@ export default function Home() {
   );
 }
 
-function FeatureCard({ icon, title, description }) {
+function FeatureCard({ iconSrc, title, description }) {
   return (
     <div className="reveal-card feature-card group rounded-[1.75rem] border border-slate-200 card-bg p-5 shadow-soft sm:p-6 dark:border-slate-700">
-      <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-blue-500 to-violet-500 text-3xl shadow-lg shadow-blue-500/20 transition-transform duration-200 group-hover:scale-105">
-        {icon}
+      <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-blue-500 to-violet-500 text-3xl shadow-lg shadow-blue-500/20 transition-transform duration-200 group-hover:scale-105 overflow-hidden">
+        <Image
+          src={iconSrc}
+          alt={title}
+          width={48}
+          height={48}
+          className="h-10 w-10 rounded-lg object-cover"
+        />
       </div>
       <h3 className="mb-2 text-xl font-bold card-title">{title}</h3>
       <p className="text-sm leading-6 card-text sm:text-base">{description}</p>
