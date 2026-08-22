@@ -317,10 +317,10 @@ function FeatureCard({ iconSrc, title, description }) {
             <div className="mb-4">
               <button type="button" onClick={() => setOpen(true)} className="block w-full rounded-lg overflow-hidden focus:outline-none">
                 <div className="relative w-full rounded-lg overflow-hidden bg-transparent">
-                  <picture className="w-full block overflow-hidden rounded-lg" style={{ aspectRatio: '1 / 1', display: 'block' }}>
+                  <picture className="w-full block overflow-hidden rounded-lg h-64 md:h-96 lg:h-[480px]">
                     <source srcSet={avifSrcSet} type="image/avif" sizes="(max-width: 640px) 480px, (max-width: 1024px) 768px, 1024px" />
                     <source srcSet={webpSrcSet} type="image/webp" sizes="(max-width: 640px) 480px, (max-width: 1024px) 768px, 1024px" />
-                                      <img src={previewSrc} alt={title} className="block w-full h-full object-cover object-center" />
+                                      <img src={previewSrc} alt={title} className="w-full h-full object-contain object-center" />
                   </picture>
                 </div>
               </button>
