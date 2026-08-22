@@ -320,7 +320,7 @@ function FeatureCard({ iconSrc, title, description }) {
                   <picture className="w-full block overflow-hidden rounded-lg h-64 md:h-96 lg:h-[480px]">
                     <source srcSet={avifSrcSet} type="image/avif" sizes="(max-width: 640px) 480px, (max-width: 1024px) 768px, 1024px" />
                     <source srcSet={webpSrcSet} type="image/webp" sizes="(max-width: 640px) 480px, (max-width: 1024px) 768px, 1024px" />
-                                      <img src={previewSrc} alt={title} className="w-full h-full object-contain object-center" />
+                                      <img src={previewSrc} alt={title} className="w-full h-full object-cover object-center" />
                   </picture>
                 </div>
               </button>
